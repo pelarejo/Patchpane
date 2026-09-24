@@ -40,6 +40,9 @@ node --test tests/viewer.test.cjs   # Node is only needed for these viewer tests
 cargo build --release
 ```
 
+After committing the release changes, run `./tooling/hb-release 0.1.0` to tag
+HEAD, push the tag, and print the source archive URL and SHA-256 for Homebrew.
+
 `src/main.rs` runs Git and combines NUL-delimited numstat with its matching patch.
 `src/viewer.js` parses hunks on demand and builds the DOM using text nodes.
 `src/page.html` and `src/style.css` are embedded at compile time.
