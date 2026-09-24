@@ -1,0 +1,11 @@
+[package]
+name = "patchpane"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "A local, self-contained HTML viewer for Git diffs"
+
+[profile.release]
+lto = true
+strip = true
+codegen-units = 1
