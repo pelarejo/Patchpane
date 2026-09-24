@@ -156,12 +156,55 @@ function compactDirectory(name, node) {
   return { name, node };
 }
 
+function treeWidthLimits(viewportWidth) {
+  return { min: 180, max: Math.max(180, Math.min(600, viewportWidth - 360)) };
+}
+
+function setupTreeResizer(handle, pane, workspace) {
+  let chosenWidth = null, drag = null;
+  function update(width) {
+    const { min, max } = treeWidthLimits(workspace.clientWidth);
+    if (width !== null) {
+      chosenWidth = Math.round(Math.max(min, Math.min(max, width)));
+      workspace.style.setProperty('--tree-width', `${chosenWidth}px`);
+    } else {
+      chosenWidth = null;
+      workspace.style.removeProperty('--tree-width');
+    }
+
+  }
+  function stop() {
+    drag = null;
+    document.body.classList.remove('resizing-tree');
+  }
+  handle.addEventListener('pointerdown', event => {
+    if (event.button !== 0 || !event.isPrimary) return;
+    drag = { x: event.clientX, width: pane.getBoundingClientRect().width };
+    handle.setPointerCapture(event.pointerId);
+    document.body.classList.add('resizing-tree');
+    event.preventDefault();
+  });
+  handle.addEventListener('pointermove', event => {
+    if (drag) update(drag.width + event.clientX - drag.x);
+  });
+  handle.addEventListener('pointerup', event => {
+    stop();
+    if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
+  });
+  handle.addEventListener('pointercancel', stop);
+  handle.addEventListener('lostpointercapture', stop);
+  handle.addEventListener('dblclick', () => update(null));
+  window.addEventListener('resize', () => { stop(); update(chosenWidth); });
+  update(null);
+}
+
 if (typeof module !== 'undefined') module.exports = { parseRows, intralineDiff, lineParts, buildFileTree, compactDirectory };
 if (typeof document !== 'undefined') startViewer();
 
 function startViewer() {
   const data = JSON.parse(document.getElementById('diff-data').textContent);
   const $ = id => document.getElementById(id);
+  setupTreeResizer($('tree-resizer'), $('file-tree'), document.querySelector('.workspace'));
   const element = (tag, className, text) => {
     const el = document.createElement(tag);
     if (className) el.className = className;
