@@ -1,11 +1,36 @@
-# Project defaults. Command-line arguments take precedence.
+# Copy to .patchpane at the Git repository root.
+# All supported configuration keys are listed below.
+# Command-line arguments override these values; --no-config skips this file.
+# Active values match the built-in defaults.
 [patchpane]
-    open = true
+    # Launch the browser after writing the report (--open / --no-open).
+    open = false
+
+    # Compare the index with HEAD rather than unstaged changes (--staged / --unstaged).
     staged = false
+
+    # Include non-ignored untracked files as additions without changing the index.
+    # CLI: --include-untracked / --no-include-untracked.
     include-untracked = false
+
+    # Context lines per hunk, from 0 through 100000 (--context N).
     context = 3
+
+    # Keep separate timestamped reports instead of replacing the report.
+    # CLI: --new-report / --overwrite. Also applies to a configured output filename.
+    new-report = false
+
+    # Output settings are alternatives: enable at most ONE of the following.
+    # Relative config paths resolve from the Git root (not the calling directory).
+    # Leaving both unset writes $PWD/patchpane/report.html by default.
+
+    # Report directory; created automatically. Filename defaults to report.html.
+    # CLI: --output-dir DIR. Consider adding this directory to .gitignore.
     # output-dir = reviews
+
+    # Output filename; its parent directory must already exist (--output FILE).
+    # Use "-" to write HTML to stdout without opening a browser or creating a file.
     # output = review.html
 
-    # Create a separate timestamped report on every run instead of replacing it.
-    new-report = false
+# Repository selection (-C), revisions, and path filters are CLI-only.
+# Viewer controls such as line wrapping and split/unified layout aren't config keys.
