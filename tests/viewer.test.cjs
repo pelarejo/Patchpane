@@ -115,3 +115,27 @@ test('whole-line replacements have no word overlay in either layout', () => {
     }
   }
 });
+
+const { buildFileTree } = require('../src/viewer.js');
+test('file tree groups nested directories without losing original navigation indices', () => {
+  const tree = buildFileTree([
+    { path: 'src/nested/a.rs' }, { path: 'README.md' },
+    { path: 'tests/a.rs' }, { path: 'src/b.rs' }, { path: 'src/nested/c.rs' },
+  ]);
+  assert.deepEqual(tree.files, [{ name: 'README.md', index: 1 }]);
+  assert.deepEqual(tree.directories.get('src').files, [{ name: 'b.rs', index: 3 }]);
+  assert.deepEqual(tree.directories.get('src').directories.get('nested').files,
+    [{ name: 'a.rs', index: 0 }, { name: 'c.rs', index: 4 }]);
+  assert.deepEqual(tree.directories.get('tests').files, [{ name: 'a.rs', index: 2 }]);
+});
+test('file tree preserves unusual names, directory/file collisions, and empty comparisons', () => {
+  const tree = buildFileTree([
+    { path: '__proto__/<script>/odd\tname.txt' },
+    { path: 'same' }, { path: 'same/child' }, { path: 'space dir/new\nname' },
+  ]);
+  assert.equal(tree.directories.get('__proto__').directories.get('<script>').files[0].name, 'odd\tname.txt');
+  assert.equal(tree.files[0].name, 'same');
+  assert.equal(tree.directories.get('same').files[0].name, 'child');
+  assert.equal(tree.directories.get('space dir').files[0].name, 'new\nname');
+  assert.equal(buildFileTree([]).directories.size, 0);
+});

@@ -129,7 +129,25 @@ function lineParts(item) {
   return pair.parts?.[item.pairSide] ?? null;
 }
 
-if (typeof module !== 'undefined') module.exports = { parseRows, intralineDiff, lineParts };
+// Keep paths as data: directory names can contain markup or object property names.
+function buildFileTree(files) {
+  const root = { directories: new Map(), files: [] };
+  files.forEach((file, index) => {
+    const parts = file.path.split('/');
+    const name = parts.pop();
+    let node = root;
+    for (const directory of parts) {
+      if (!node.directories.has(directory)) {
+        node.directories.set(directory, { directories: new Map(), files: [] });
+      }
+      node = node.directories.get(directory);
+    }
+    node.files.push({ name, index });
+  });
+  return root;
+}
+
+if (typeof module !== 'undefined') module.exports = { parseRows, intralineDiff, lineParts, buildFileTree };
 if (typeof document !== 'undefined') startViewer();
 
 function startViewer() {
@@ -258,8 +276,8 @@ function startViewer() {
   for (const [index, file] of data.files.entries()) {
     const id = `file-${index}`;
     const link = element('a'); link.href = `#${id}`;
-    link.append(element('span', 'filename', file.path), element('span', 'delta plus', `+${file.added}`), element('span', 'delta minus', `−${file.removed}`));
-    link.title = file.path; $('files').append(link);
+    link.append(element('span', 'filename', file.path.split('/').at(-1)), element('span', 'delta plus', `+${file.added}`), element('span', 'delta minus', `−${file.removed}`));
+    link.title = file.path; link.setAttribute('aria-label', file.path);
     const article = element('article'); article.id = id; article.dataset.index = index;
     const details = document.createElement('details'); details.open = true;
     const summary = document.createElement('summary');
@@ -277,6 +295,38 @@ function startViewer() {
     link.addEventListener('click', () => { details.open = true; render(entry); for (const e of entries) e.link.classList.toggle('active', e === entry); });
     observer.observe(article);
   }
+  const folders = [];
+  function renderTree(node, parent, prefix = '') {
+    const groups = [];
+    for (const [name, child] of [...node.directories].sort(([a], [b]) => a.localeCompare(b))) {
+      const folder = element('details', 'directory'); folder.open = true;
+      const heading = element('summary', 'directory-heading');
+      heading.append(element('span', 'directory-name', name));
+      heading.title = prefix + name;
+      heading.setAttribute('aria-label', `Directory ${prefix}${name}`);
+      const contents = element('div', 'directory-contents');
+      folder.append(heading, contents); parent.append(folder); folders.push(folder);
+      groups.push({ folder, tree: renderTree(child, contents, prefix + name + '/') });
+    }
+    const links = [];
+    for (const file of [...node.files].sort((a, b) => a.name.localeCompare(b.name))) {
+      const link = entries[file.index].link;
+      parent.append(link); links.push(link);
+    }
+    return { groups, links };
+  }
+  const navigation = renderTree(buildFileTree(data.files), $('files'));
+  let savedFolderState = null;
+  function filterTree(tree, searching) {
+    let visible = tree.links.some(link => !link.hidden);
+    for (const group of tree.groups) {
+      const childVisible = filterTree(group.tree, searching);
+      group.folder.hidden = !childVisible;
+      if (searching && childVisible) group.folder.open = true;
+      visible = visible || childVisible;
+    }
+    return visible;
+  }
   updateProgress();
   if (!entries.length) {
     const empty = element('div', 'empty-state');
@@ -288,6 +338,12 @@ function startViewer() {
     for (const entry of entries) {
       const match = `${entry.file.path}\n${entry.file.oldPath || ''}`.toLowerCase().includes(query);
       entry.article.hidden = !match; entry.link.hidden = !match; if (match) visible++;
+    }
+    if (query && savedFolderState === null) savedFolderState = folders.map(folder => folder.open);
+    filterTree(navigation, Boolean(query));
+    if (!query && savedFolderState !== null) {
+      folders.forEach((folder, index) => { folder.open = savedFolderState[index]; });
+      savedFolderState = null;
     }
     $('empty').hidden = visible !== 0 || entries.length === 0;
     for (const entry of entries) {
