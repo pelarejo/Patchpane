@@ -248,9 +248,12 @@ fn git_command(opt: &Options) -> Command {
 }
 
 fn git_output(command: &mut Command) -> Result<Vec<u8>, String> {
-    let output = command
-        .output()
-        .map_err(|e| format!("could not run Git: {e}"))?;
+    let output = command.output().map_err(|e| match e.kind() {
+        io::ErrorKind::NotFound => {
+            "Git is required but was not found on PATH. Install Git and try again.".into()
+        }
+        _ => format!("could not run Git: {e}"),
+    })?;
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().into());
     }
@@ -478,13 +481,8 @@ fn run() -> Result<(), String> {
     if opt.path_separator {
         git.arg("--").args(&opt.paths);
     }
-    let result = git
-        .output()
-        .map_err(|e| format!("could not run Git: {e}"))?;
-    if !result.status.success() {
-        return Err(String::from_utf8_lossy(&result.stderr).trim().to_string());
-    }
-    let mut files = parse_diff(&result.stdout)?;
+    let result = git_output(&mut git)?;
+    let mut files = parse_diff(&result)?;
     if opt.include_untracked {
         files.extend(untracked_diff(&opt)?);
     }
