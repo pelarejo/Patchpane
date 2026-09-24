@@ -162,3 +162,61 @@ test('directory compaction stops at files or multiple subdirectories', () => {
   assert.equal(tests.name, 'tests/unit');
   assert.equal(tests.node.directories.size, 2);
 });
+
+const syntax = require('../src/syntax.js');
+test('syntax detection handles common source files and unknown files stay plain', () => {
+  for (const [path, language] of [['a.rs', 'rust'], ['a.tsx', 'typescript'], ['a.py', 'python'], ['Cargo.toml', 'ini'], ['a.html', 'xml'], ['Makefile', 'makefile']])
+    assert.equal(syntax.language(path), language);
+  assert.equal(syntax.highlightLines(['some words'], 'notes.unknown'), null);
+  const rust = syntax.highlightLines(['pub fn main() { let x = "hello"; }'], 'main.rs')[0];
+  assert.ok(rust.some(t => t.className.includes('hljs-keyword')));
+  assert.ok(rust.some(t => t.className.includes('hljs-string')));
+});
+test('syntax preserves literal HTML and entities without executing or dropping text', () => {
+  const source = '<script>alert("<&amp;>")</script>';
+  const tokens = syntax.highlightLines([source], 'page.html');
+  assert.equal(tokens[0].map(t => t.text).join(''), source);
+});
+test('syntax spans multiline comments and composes with word-change backgrounds', () => {
+  for (const split of [true, false]) {
+    const rows = parseRows('@@ -1,3 +1,3 @@\n /* begin\n-old value\n+new value\n end */\n', split);
+    syntax.prepare(rows, split, 'a.js', 'a.js');
+    const left = split ? rows[2].left : rows[2].single;
+    const right = split ? rows[2].right : rows[3].single;
+    assert.equal(Object.hasOwn(left.syntaxGroup, 'syntaxOld'), false);
+    const parts = syntax.segments(left, 'old', lineParts(left));
+    assert.equal(fullText(parts), 'old value');
+    assert.ok(parts.every(t => t.className.includes('hljs-comment')));
+    assert.equal(changedText(parts), 'old');
+    assert.equal(changedText(syntax.segments(right, 'next', lineParts(right))), 'new');
+  }
+});
+test('hunks and old/new sides keep independent syntax state and annotations', () => {
+  const rows = parseRows('@@ -1,2 +1,2 @@\n-/* comment\n+const x = 1;\n rest\n@@ -20 +20 @@\n-old\n+const y = "text";\n\\ No newline at end of file\n', true);
+  syntax.prepare(rows, true, 'a.js', 'a.js');
+  assert.ok(syntax.segments(rows[2].left, 'old', null).some(t => t.className.includes('comment')));
+  assert.ok(syntax.segments(rows[2].right, 'next', null).every(t => !t.className.includes('comment')));
+  const parts = syntax.segments(rows[4].right, 'next', lineParts(rows[4].right));
+  assert.equal(fullText(parts), 'const y = "text";\n\\ No newline at end of file');
+  assert.ok(parts.some(t => t.className.includes('hljs-keyword')));
+  assert.equal(parts.at(-1).className, '');
+});
+test('oversized syntax inputs fall back without losing diff text', () => {
+  assert.equal(syntax.highlightLines(['a'.repeat(10001)], 'a.js'), null);
+  assert.equal(syntax.highlightLines(Array(2001).fill('let x = 1;'), 'a.js'), null);
+  const row = { text: 'plain <text>' };
+  assert.equal(fullText(syntax.segments(row, 'next', null)), row.text);
+});
+
+test('embedded highlighter escapes HTML script parser comment transitions', () => {
+  const fs = require('node:fs');
+  const vm = require('node:vm');
+  const source = fs.readFileSync(require.resolve('../src/vendor/highlight.min.js'), 'utf8').replaceAll('<!--', '\\x3c!--');
+  const context = vm.createContext({});
+  vm.runInContext(source, context);
+  const html = '<!-- comment --><script>alert(1)</script>';
+  const output = context.hljs.highlight(html, { language: 'xml' }).value;
+  assert.match(output, /hljs-comment/);
+  assert.ok(!source.includes('<!--'));
+  assert.ok(!source.toLowerCase().includes('</script'));
+});

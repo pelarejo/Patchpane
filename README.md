@@ -1,7 +1,7 @@
 # Patchpane
 
 Review Git changes in a clean, local HTML page. Patchpane brings side-by-side
-diffs and focused change highlighting to your terminal workflow, with everything
+diffs, syntax coloring, and focused change highlighting to your terminal workflow, with everything
 contained in one file that works offline.
 
 ## Install
@@ -48,4 +48,5 @@ and SHA-256 for Homebrew. It fails first if the tag exists locally or on origin.
 `src/viewer.js` parses hunks on demand and builds the DOM using text nodes.
 `src/page.html` and `src/style.css` are embedded at compile time.
 
-Licensed under [MIT](LICENSE).
+Licensed under [MIT](LICENSE). Bundled [Highlight.js](https://highlightjs.org/)
+is covered by its [BSD 3-Clause license](src/vendor/highlight.LICENSE).

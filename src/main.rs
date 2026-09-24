@@ -240,6 +240,15 @@ fn render(title: &str, files: &[FileDiff]) -> String {
         .replace("/* PATCHPANE_CSS */", include_str!("style.css"))
         .replace("/* PATCHPANE_JS */", include_str!("viewer.js"))
         .replace(
+            "/* HIGHLIGHT_LICENSE */",
+            &format!("/*\n{}\n*/", include_str!("vendor/highlight.LICENSE")),
+        )
+        .replace(
+            "/* HIGHLIGHT_JS */",
+            include_str!("vendor/highlight.min.js"),
+        )
+        .replace("/* SYNTAX_JS */", include_str!("syntax.js"))
+        .replace(
             "<!-- PATCHPANE_DATA -->",
             &format!("{{\"title\":{},\"files\":[{}]}}", json(title), data),
         )

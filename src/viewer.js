@@ -227,19 +227,18 @@ function startViewer() {
     }
   }, { rootMargin: '400px' });
 
-  function codeCell(className, item, prefix = '') {
+  function codeCell(className, item, prefix = '', side = 'next') {
     const td = element('td', className);
     const viewport = element('div', 'line');
     const line = element('span', 'line-content');
     viewport.append(line);
     if (prefix) line.append(prefix);
-    const parts = lineParts(item);
-    if (parts) {
-      for (const part of parts) {
-        if (part.changed) line.append(element('span', 'intraline', part.text));
-        else line.append(part.text);
-      }
-    } else line.append(item?.text ?? '');
+    const parts = PatchpaneSyntax.segments(item, side, lineParts(item));
+    for (const part of parts) {
+      const className = [part.className, part.changed ? 'intraline' : ''].filter(Boolean).join(' ');
+      if (className) line.append(element('span', className, part.text));
+      else line.append(part.text);
+    }
     td.append(viewport);
     return td;
   }
@@ -248,6 +247,7 @@ function startViewer() {
     if (entry.rendered) return;
     entry.rendered = true;
     const rows = parseRows(entry.file.patch, split);
+    PatchpaneSyntax.prepare(rows, split, entry.file.oldPath || entry.file.path, entry.file.path);
     const scroll = element('div', 'diff-scroll');
     const table = element('table', 'diff');
     table.setAttribute('aria-label', `Diff for ${entry.file.path}`);
@@ -298,7 +298,7 @@ function startViewer() {
     const more = element('button', 'load-more');
     function cell(row, item, side) {
       row.append(element('td', `number ${item?.kind || 'gap'}`, item ? String((side === 'old' ? item.old : item.next) ?? '') : ''));
-      row.append(codeCell(`code ${item?.kind || 'gap'} ${side === 'next' ? 'split-edge' : ''}`, item));
+      row.append(codeCell(`code ${item?.kind || 'gap'} ${side === 'next' ? 'split-edge' : ''}`, item, '', side));
     }
     function batch() {
       const fragment = document.createDocumentFragment();
@@ -312,7 +312,7 @@ function startViewer() {
           cell(row, item.left, 'old'); cell(row, item.right, 'next');
         } else {
           const line = item.single;
-          row.append(element('td', `number ${line.kind}`, String(line.old ?? '')), element('td', `number ${line.kind}`, String(line.next ?? '')), codeCell(`code ${line.kind}`, line, `${line.kind === 'add' ? '+' : line.kind === 'del' ? '−' : ' '} `));
+          row.append(element('td', `number ${line.kind}`, String(line.old ?? '')), element('td', `number ${line.kind}`, String(line.next ?? '')), codeCell(`code ${line.kind}`, line, `${line.kind === 'add' ? '+' : line.kind === 'del' ? '−' : ' '} `, line.kind === 'del' ? 'old' : 'next'));
         }
         fragment.append(row);
       }

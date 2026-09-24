@@ -25,3 +25,19 @@ aside{min-width:0}
 .resizing-tree,.resizing-tree *{cursor:col-resize!important;user-select:none!important}
 @media(max-width:600px){#tree-resizer{display:none}}
 @media print{#tree-resizer{display:none}}
+
+/* Syntax colors keep diff backgrounds visible, including the stronger word overlay. */
+.hljs-keyword,.hljs-selector-tag,.hljs-literal{color:#9530a2}
+.hljs-string,.hljs-regexp,.hljs-template-tag{color:#176b3d}
+.hljs-number,.hljs-symbol,.hljs-attr,.hljs-attribute{color:#075fa3}
+.hljs-title,.hljs-built_in,.hljs-type,.hljs-section{color:#825000}
+.hljs-comment,.hljs-quote{color:#667085;font-style:italic}
+.hljs-meta,.hljs-tag,.hljs-name{color:#b1363b}
+@media(prefers-color-scheme:dark){
+.hljs-keyword,.hljs-selector-tag,.hljs-literal{color:#deb0f4}
+.hljs-string,.hljs-regexp,.hljs-template-tag{color:#a5dbaf}
+.hljs-number,.hljs-symbol,.hljs-attr,.hljs-attribute{color:#9dceff}
+.hljs-title,.hljs-built_in,.hljs-type,.hljs-section{color:#f3d392}
+.hljs-comment,.hljs-quote{color:#a7b0bf}
+.hljs-meta,.hljs-tag,.hljs-name{color:#ffb3af}
+}
