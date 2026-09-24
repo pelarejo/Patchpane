@@ -139,3 +139,26 @@ test('file tree preserves unusual names, directory/file collisions, and empty co
   assert.equal(tree.directories.get('space dir').files[0].name, 'new\nname');
   assert.equal(buildFileTree([]).directories.size, 0);
 });
+
+const { compactDirectory } = require('../src/viewer.js');
+test('compacts single-child directory chains and preserves file navigation indices', () => {
+  const tree = buildFileTree([{ path: 'src/components/forms/input.js' }]);
+  const compact = compactDirectory('src', tree.directories.get('src'));
+  assert.equal(compact.name, 'src/components/forms');
+  assert.deepEqual(compact.node.files, [{ name: 'input.js', index: 0 }]);
+  assert.ok(tree.directories.get('src').directories.has('components'));
+});
+test('directory compaction stops at files or multiple subdirectories', () => {
+  const tree = buildFileTree([
+    { path: 'src/components/index.js' },
+    { path: 'src/components/forms/input.js' },
+    { path: 'tests/unit/parser/test.js' },
+    { path: 'tests/unit/viewer/test.js' },
+  ]);
+  const source = compactDirectory('src', tree.directories.get('src'));
+  assert.equal(source.name, 'src/components');
+  assert.equal(source.node.files[0].name, 'index.js');
+  const tests = compactDirectory('tests', tree.directories.get('tests'));
+  assert.equal(tests.name, 'tests/unit');
+  assert.equal(tests.node.directories.size, 2);
+});

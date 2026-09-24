@@ -147,7 +147,16 @@ function buildFileTree(files) {
   return root;
 }
 
-if (typeof module !== 'undefined') module.exports = { parseRows, intralineDiff, lineParts, buildFileTree };
+function compactDirectory(name, node) {
+  while (node.files.length === 0 && node.directories.size === 1) {
+    const [childName, child] = node.directories.entries().next().value;
+    name += '/' + childName;
+    node = child;
+  }
+  return { name, node };
+}
+
+if (typeof module !== 'undefined') module.exports = { parseRows, intralineDiff, lineParts, buildFileTree, compactDirectory };
 if (typeof document !== 'undefined') startViewer();
 
 function startViewer() {
@@ -298,7 +307,8 @@ function startViewer() {
   const folders = [];
   function renderTree(node, parent, prefix = '') {
     const groups = [];
-    for (const [name, child] of [...node.directories].sort(([a], [b]) => a.localeCompare(b))) {
+    for (const [directoryName, directory] of [...node.directories].sort(([a], [b]) => a.localeCompare(b))) {
+      const { name, node: child } = compactDirectory(directoryName, directory);
       const folder = element('details', 'directory'); folder.open = true;
       const heading = element('summary', 'directory-heading');
       heading.append(element('span', 'directory-name', name));
