@@ -16,7 +16,11 @@ Usage: patchpane [OPTIONS] [REVISION [REVISION]] [-- PATH...]
   --include-untracked   Append non-ignored untracked files as additions
   -C, --repo DIR         Run Git in DIR
   -o, --output FILE      Write FILE (use - for stdout); default: $PWD/patchpane/
-  --no-open             Don't launch the default browser
+  --no-open, --open     Disable/enable browser opening
+  --unstaged            Override a configured staged comparison
+  --no-include-untracked  Override configured untracked file inclusion
+  --output-dir DIR      Directory for uniquely named HTML files
+  --no-config           Ignore the project .patchpane configuration
   --context N           Context lines per hunk (default: 3)
   -h, --help            Show help
   -V, --version         Show version
@@ -30,12 +34,15 @@ With no revision, shows unstaged tracked changes, like git diff.
 Untracked files are excluded unless --include-untracked is set.
 Existing output files are never overwritten.
 Paths such as '.' are accepted directly; use '-- PATH...' to disambiguate.
+Defaults are read from .patchpane at the Git root; CLI options take priority.
 ";
 
 #[derive(Default)]
 struct Options {
     repo: Option<OsString>,
     output: Option<OsString>,
+    output_dir: Option<PathBuf>,
+    no_config: bool,
     revisions: Vec<OsString>,
     paths: Vec<OsString>,
     path_separator: bool,
@@ -46,10 +53,19 @@ struct Options {
 }
 
 fn options(args: impl Iterator<Item = OsString>) -> Result<Option<Options>, String> {
-    let mut opt = Options {
-        context: 3,
-        ..Options::default()
-    };
+    options_with_defaults(
+        args,
+        Options {
+            context: 3,
+            ..Options::default()
+        },
+    )
+}
+
+fn options_with_defaults(
+    args: impl Iterator<Item = OsString>,
+    mut opt: Options,
+) -> Result<Option<Options>, String> {
     let mut args = args.peekable();
     while let Some(arg) = args.next() {
         match arg.to_str() {
@@ -68,14 +84,25 @@ fn options(args: impl Iterator<Item = OsString>) -> Result<Option<Options>, Stri
             }
             Some("--staged" | "--cached") => opt.staged = true,
             Some("--no-open") => opt.no_open = true,
+            Some("--open") => opt.no_open = false,
+            Some("--unstaged") => opt.staged = false,
+            Some("--no-include-untracked") => opt.include_untracked = false,
+            Some("--no-config") => opt.no_config = true,
             Some("--include-untracked") => opt.include_untracked = true,
-            Some("-C" | "--repo" | "-o" | "--output" | "--context") => {
+            Some("-C" | "--repo" | "-o" | "--output" | "--output-dir" | "--context") => {
                 let value = args
                     .next()
                     .ok_or_else(|| format!("{} requires a value", arg.to_string_lossy()))?;
                 match arg.to_str().unwrap() {
                     "-C" | "--repo" => opt.repo = Some(value),
-                    "-o" | "--output" => opt.output = Some(value),
+                    "-o" | "--output" => {
+                        opt.output = Some(value);
+                        opt.output_dir = None;
+                    }
+                    "--output-dir" => {
+                        opt.output_dir = Some(PathBuf::from(value));
+                        opt.output = None;
+                    }
                     _ => {
                         opt.context = value
                             .to_str()
@@ -331,10 +358,88 @@ fn untracked_diff(opt: &Options) -> Result<Vec<FileDiff>, String> {
     Ok(files)
 }
 
+// Git parses its native config syntax for us; includes are disabled so this file
+// cannot load configuration from outside the selected project.
+fn project_defaults(cli: &Options) -> Result<Options, String> {
+    let mut defaults = Options {
+        context: 3,
+        ..Options::default()
+    };
+    if cli.no_config {
+        return Ok(defaults);
+    }
+    let root = git_output(git_command(cli).args(["rev-parse", "--show-toplevel"]))?;
+    let root = path_from_bytes(root.strip_suffix(b"\n").unwrap_or(&root))?;
+    let path = root.join(".patchpane");
+    match std::fs::metadata(&path) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(defaults),
+        Err(e) => return Err(format!("cannot inspect {}: {e}", path.display())),
+        Ok(_) => {}
+    }
+    let bytes = git_output(
+        git_command(cli)
+            .args(["config", "--null", "--list", "--no-includes", "--file"])
+            .arg(&path),
+    )?;
+    let text = std::str::from_utf8(&bytes)
+        .map_err(|_| format!("{}: configuration must be UTF-8", path.display()))?;
+    let mut seen = std::collections::HashSet::new();
+    for record in text.split('\0').filter(|r| !r.is_empty()) {
+        let (key, value) = record.split_once('\n').unwrap_or((record, ""));
+        let invalid = |message: &str| format!("{}: {key}: {message}", path.display());
+        if !seen.insert(key) {
+            return Err(invalid("duplicate setting"));
+        }
+        let boolean = || match value {
+            "true" => Ok(true),
+            "false" => Ok(false),
+            _ => Err(invalid("expected true or false")),
+        };
+        match key {
+            "patchpane.open" => defaults.no_open = !boolean()?,
+            "patchpane.staged" => defaults.staged = boolean()?,
+            "patchpane.include-untracked" => defaults.include_untracked = boolean()?,
+            "patchpane.context" => {
+                defaults.context = value
+                    .parse::<u32>()
+                    .ok()
+                    .filter(|n| *n <= 100_000)
+                    .ok_or_else(|| invalid("expected an integer between 0 and 100000"))?
+            }
+            "patchpane.output" | "patchpane.output-dir" => {
+                if value.is_empty() {
+                    return Err(invalid("path must not be empty"));
+                }
+                if key == "patchpane.output" && value == "-" {
+                    defaults.output = Some(OsString::from("-"));
+                } else {
+                    let resolved = root.join(value);
+                    if key == "patchpane.output" {
+                        defaults.output = Some(resolved.into_os_string());
+                    } else {
+                        defaults.output_dir = Some(resolved);
+                    }
+                }
+            }
+            _ => return Err(invalid("unknown setting")),
+        }
+    }
+    if defaults.output.is_some() && defaults.output_dir.is_some() {
+        return Err(format!(
+            "{}: choose either output or output-dir",
+            path.display()
+        ));
+    }
+    Ok(defaults)
+}
+
 fn run() -> Result<(), String> {
-    let Some(opt) = options(env::args_os().skip(1))? else {
+    let args: Vec<_> = env::args_os().skip(1).collect();
+    let Some(cli) = options(args.clone().into_iter())? else {
         return Ok(());
     };
+    let defaults = project_defaults(&cli)?;
+    let opt = options_with_defaults(args.into_iter(), defaults)?.expect("help handled above");
     let mut git = Command::new("git");
     if let Some(dir) = &opt.repo {
         git.arg("-C").arg(dir);
@@ -411,9 +516,12 @@ fn run() -> Result<(), String> {
     let path = if let Some(output) = opt.output {
         PathBuf::from(output)
     } else {
-        let directory = env::current_dir()
-            .map_err(|e| format!("cannot determine current directory: {e}"))?
-            .join("patchpane");
+        let directory = match opt.output_dir {
+            Some(directory) => directory,
+            None => env::current_dir()
+                .map_err(|e| format!("cannot determine current directory: {e}"))?
+                .join("patchpane"),
+        };
         std::fs::create_dir_all(&directory)
             .map_err(|e| format!("cannot create {}: {e}", directory.display()))?;
         let stamp = SystemTime::now()
@@ -482,6 +590,42 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cli_overrides_boolean_defaults_in_both_directions() {
+        let defaults = Options {
+            no_open: true,
+            staged: true,
+            include_untracked: true,
+            context: 8,
+            ..Options::default()
+        };
+        let opt = options_with_defaults(
+            [
+                "--open",
+                "--unstaged",
+                "--no-include-untracked",
+                "--context",
+                "0",
+            ]
+            .into_iter()
+            .map(OsString::from),
+            defaults,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(!opt.no_open && !opt.staged && !opt.include_untracked);
+        assert_eq!(opt.context, 0);
+        let opt = options_with_defaults(
+            ["--no-open", "--staged", "--include-untracked"]
+                .into_iter()
+                .map(OsString::from),
+            opt,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(opt.no_open && opt.staged && opt.include_untracked);
+    }
+
     #[test]
     fn escape_script_and_controls() {
         assert_eq!(

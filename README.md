@@ -36,6 +36,35 @@ are shown as metadata. Non-UTF-8 text is displayed with replacement characters.
 No syntax highlighting, comments, or context expansion beyond `--context`.
 Memory use scales with patch size; rendering is incremental, ingestion is not.
 
+## Project configuration
+
+Add `.patchpane` at the Git repository root (Git config syntax):
+
+```ini
+[patchpane]
+    open = false
+    include-untracked = true
+    staged = false
+    context = 8
+    output-dir = reviews
+```
+
+Precedence: CLI arguments → project config → built-in defaults. The same config
+is found from subdirectories or with `-C`; no global or parent-project config is
+loaded. Revisions, path filters, and the repository are selected on the CLI.
+
+All supported keys appear above, plus `output` for a fixed filename or `-` for
+stdout. Choose either `output` or `output-dir`. Relative config paths resolve
+from the repository root; CLI output paths resolve from `$PWD`. Without either,
+output still goes to `$PWD/patchpane/`. Existing files are never overwritten.
+Add your report directory to `.gitignore` when using `include-untracked`.
+
+Override booleans with `--open` / `--no-open`, `--staged` / `--unstaged`, and
+`--include-untracked` / `--no-include-untracked`. Use `--output-dir DIR` for unique
+reports or `-o FILE` for a fixed file; either overrides the configured output
+setting. `--no-config` skips configuration entirely. Unknown or duplicate keys,
+invalid values, and malformed config produce errors; config includes are unsupported.
+
 ## Development
 
 ```sh

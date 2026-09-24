@@ -1,0 +1,8 @@
+# Project defaults. Command-line arguments take precedence.
+[patchpane]
+    open = true
+    staged = false
+    include-untracked = false
+    context = 3
+    # output-dir = reviews
+    # output = review.html

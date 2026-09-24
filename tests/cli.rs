@@ -300,3 +300,88 @@ fn untracked_symlink_is_shown_without_reading_its_target() {
     assert!(h.contains("odd\\u0009name\\u000a.txt"));
     assert!(h.contains("+\\u003c/script>"));
 }
+
+#[test]
+fn project_config_controls_comparison_and_cli_overrides_it() {
+    let r = Repo::new();
+    r.write("tracked", b"before\nold\nafter\n");
+    r.commit();
+    r.write("tracked", b"before\nstaged\nafter\n");
+    r.git(&["add", "tracked"]);
+    r.write("tracked", b"before\nworking\nafter\n");
+    r.write("new", b"untracked\n");
+    r.write(
+        ".patchpane",
+        b"[patchpane]\nopen = false\nstaged = true\ninclude-untracked = true\ncontext = 0\n",
+    );
+    let h = r.html(&[]);
+    assert!(h.contains("+staged"));
+    assert!(!h.contains("+working"));
+    assert!(!h.contains("\\u000a before\\u000a"));
+    assert!(h.contains("\"path\":\"new\""));
+    let h = r.html(&["--unstaged", "--no-include-untracked", "--context", "1"]);
+    assert!(h.contains("+working"));
+    assert!(h.contains("\\u000a before\\u000a"));
+    assert!(!h.contains("\"path\":\"new\""));
+    let h = r.html(&["--no-config"]);
+    assert!(h.contains("+working"));
+    assert!(!h.contains("\"path\":\"new\""));
+}
+
+#[test]
+fn configuration_is_root_scoped_and_output_paths_are_root_relative() {
+    let r = Repo::new();
+    r.write(
+        ".patchpane",
+        b"[patchpane]\nopen = false\noutput-dir = reports\n",
+    );
+    let nested = r.0.join("nested");
+    fs::create_dir(&nested).unwrap();
+    // A nested config must not replace the project's root config.
+    r.write("nested/.patchpane", b"invalid configuration");
+    let output = Command::new(env!("CARGO_BIN_EXE_patchpane"))
+        .current_dir(&nested)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(fs::read_dir(r.0.join("reports")).unwrap().count(), 1);
+    assert!(!nested.join("reports").exists());
+    let output = r.run(&["--output-dir", r.0.join("override").to_str().unwrap()]);
+    assert!(output.status.success());
+    assert_eq!(fs::read_dir(r.0.join("override")).unwrap().count(), 1);
+    let file = r.0.join("explicit.html");
+    assert!(r.run(&["-o", file.to_str().unwrap()]).status.success());
+    assert!(file.exists());
+    r.write(
+        ".patchpane",
+        b"[patchpane]\nopen = false\noutput = fixed.html\n",
+    );
+    assert!(r.run(&[]).status.success());
+    assert!(r.0.join("fixed.html").exists());
+    assert!(!r.run(&[]).status.success());
+    assert!(r.html(&[]).starts_with("<!doctype html>"));
+}
+
+#[test]
+fn invalid_config_is_actionable_and_can_be_bypassed() {
+    let r = Repo::new();
+    for config in [
+        "[patchpane]\ncontext = -1\n",
+        "[patchpane]\nopen = perhaps\n",
+        "[patchpane]\nunknown = true\n",
+        "[patchpane]\ncontext = 1\ncontext = 2\n",
+        "[patchpane]\noutput = a\noutput-dir = b\n",
+        "[broken",
+    ] {
+        r.write(".patchpane", config.as_bytes());
+        let output = r.run(&["--no-open", "-o", "-"]);
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains(".patchpane"));
+        assert!(r.html(&["--no-config"]).contains("\"files\":[]"));
+        assert!(r.run(&["--help"]).status.success());
+    }
+}
