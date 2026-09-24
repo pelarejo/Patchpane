@@ -16,7 +16,7 @@ Usage: patchpane [OPTIONS] [REVISION [REVISION]] [-- PATH...]
   --include-untracked   Append non-ignored untracked files as additions
   -C, --repo DIR         Run Git in DIR
   -o, --output FILE      Write FILE (use - for stdout); default: $PWD/patchpane/
-  --no-open, --open     Disable/enable browser opening
+  --no-open, --open     Disable/enable browser opening (default: disabled)
   --unstaged            Override a configured staged comparison
   --no-include-untracked  Override configured untracked file inclusion
   --output-dir DIR      Report directory (default filename: report.html)
@@ -60,6 +60,7 @@ fn options(args: impl Iterator<Item = OsString>) -> Result<Option<Options>, Stri
         args,
         Options {
             context: 3,
+            no_open: true,
             ..Options::default()
         },
     )
@@ -371,6 +372,7 @@ fn untracked_diff(opt: &Options) -> Result<Vec<FileDiff>, String> {
 fn project_defaults(cli: &Options) -> Result<Options, String> {
     let mut defaults = Options {
         context: 3,
+        no_open: true,
         ..Options::default()
     };
     if cli.no_config {
@@ -589,18 +591,53 @@ fn run() -> Result<(), String> {
     write_report(&path, html.as_bytes(), !opt.new_report)?;
     let path = path.canonicalize().map_err(|e| e.to_string())?;
     eprintln!(
-        "{} files (+{} −{}) → {}",
+        "{} files (+{} −{})",
         files.len(),
         files.iter().map(|f| f.added).sum::<usize>(),
-        files.iter().map(|f| f.removed).sum::<usize>(),
-        path.display()
+        files.iter().map(|f| f.removed).sum::<usize>()
     );
+    println!("{}", file_url(&path));
     if !opt.no_open
         && let Err(e) = open_browser(&path)
     {
         eprintln!("patchpane: browser could not open ({e}); open the HTML file manually");
     }
     Ok(())
+}
+
+fn file_url(path: &std::path::Path) -> String {
+    #[cfg(windows)]
+    let normalized = {
+        let path = path.to_string_lossy();
+        let path = if let Some(unc) = path.strip_prefix(r"\\?\UNC\") {
+            format!("//{unc}")
+        } else {
+            path.strip_prefix(r"\\?\").unwrap_or(&path).to_string()
+        };
+        path.replace('\\', "/")
+    };
+    #[cfg(windows)]
+    let bytes = normalized.as_bytes();
+    #[cfg(not(windows))]
+    let bytes = path.as_os_str().as_encoded_bytes();
+
+    let mut url = String::from("file://");
+    #[cfg(windows)]
+    let bytes = if let Some(unc) = bytes.strip_prefix(b"//") {
+        unc
+    } else {
+        url.push('/');
+        bytes
+    };
+    for &byte in bytes {
+        if byte.is_ascii_alphanumeric() || b"-._~/:".contains(&byte) {
+            url.push(byte as char);
+        } else {
+            use std::fmt::Write;
+            write!(url, "%{byte:02X}").expect("writing to a String cannot fail");
+        }
+    }
+    url
 }
 
 fn open_browser(path: &std::path::Path) -> io::Result<()> {
@@ -635,6 +672,28 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    #[test]
+    fn file_urls_encode_special_characters() {
+        assert_eq!(
+            file_url(std::path::Path::new("/tmp/a b/#100%?é.html")),
+            "file:///tmp/a%20b/%23100%25%3F%C3%A9.html"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn file_urls_handle_windows_canonical_paths() {
+        assert_eq!(
+            file_url(std::path::Path::new(r"\\?\C:\my reports\report.html")),
+            "file:///C:/my%20reports/report.html"
+        );
+        assert_eq!(
+            file_url(std::path::Path::new(r"\\?\UNC\server\share\report.html")),
+            "file://server/share/report.html"
+        );
+    }
+
     #[test]
     fn cli_overrides_boolean_defaults_in_both_directions() {
         let defaults = Options {

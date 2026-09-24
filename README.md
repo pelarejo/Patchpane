@@ -1,78 +1,34 @@
 # Patchpane
 
-Generate a self-contained, offline HTML review of Git changes. Rust CLI, no
-crate dependencies; Git is the only runtime dependency. Embedded CSS and
-JavaScript, no server, CDN, or network requests.
+Review Git changes in a clean, local HTML page. Patchpane brings side-by-side
+diffs and focused change highlighting to your terminal workflow, with everything
+contained in one file that works offline.
+
+## Install
 
 ```sh
-cargo install --path .
-patchpane                         # unstaged tracked changes; opens browser
-patchpane .                       # restrict to the current directory
-patchpane --include-untracked .   # also show non-ignored new files
-patchpane --staged                # index vs HEAD (also works before first commit)
-patchpane main...HEAD             # merge-base comparison
-patchpane HEAD~3 HEAD -- src/      # two revisions, restricted to paths
-patchpane -C /path/to/repo --context 8
-patchpane --no-open -o review.html
-patchpane HEAD -o - > review.html  # stdout never opens browser
+brew tap pelarejo/tap
+brew install pelarejo/tap/patchpane
 ```
 
-Without `-o`, output replaces `$PWD/patchpane/report.html` on each run; the
-directory is created automatically. `-o FILE` also replaces that file. Use
-`--new-report` to keep each run as a uniquely named file (a timestamp suffix is
-added to the default or specified filename). `--overwrite` restores replacement
-when config enables new reports. `-C` changes the Git repository, not the output directory. Files are owner-readable/writable on Unix. HTML embeds
-the selected patch, so treat it like source code when sharing it.
+## Usage
 
-Split/unified views, line numbers, file filtering, viewed markers, collapsible
-files, line wrapping, and system light/dark theme. Files render near the viewport;
-large files load 400 rows at a time. Full patch data stays embedded in the HTML.
-Viewed markers last until reload. Replacement lines are paired by position, with
-stronger backgrounds on changed words and identifiers in split and unified views.
-Each file has one horizontal scrollbar that moves both sides together; horizontal
-trackpad gestures or Shift+wheel over the diff use the same shared position. Highlighting
-is computed as rows render; oversized comparisons fall back to whole-line coloring.
-
-Untracked files are excluded by default. `--include-untracked` appends current
-untracked files as additions, respects ignore rules and path filters, and leaves
-the index unchanged. It can also accompany staged or revision comparisons; those
-extra files always come from the current working tree. Nested untracked repositories
-are skipped. Binary changes and file modes
-are shown as metadata. Non-UTF-8 text is displayed with replacement characters.
-No syntax highlighting, comments, or context expansion beyond `--context`.
-Memory use scales with patch size; rendering is incremental, ingestion is not.
-
-## Project configuration
-
-Add `.patchpane` at the Git repository root (Git config syntax):
-
-```ini
-[patchpane]
-    open = false
-    include-untracked = true
-    staged = false
-    context = 8
-    output-dir = reviews
-    new-report = false
+```sh
+patchpane                         # Working-tree changes
+patchpane --staged                # Staged changes
+patchpane main...HEAD             # Compare branches
+patchpane --include-untracked     # Include new files
 ```
 
-Precedence: CLI arguments → project config → built-in defaults. The same config
-is found from subdirectories or with `-C`; no global or parent-project config is
-loaded. Revisions, path filters, and the repository are selected on the CLI.
+Patchpane writes `patchpane/report.html` and prints a clickable `file://` link.
+Each run replaces the report. Use `--open` to launch it in your browser, or
+`patchpane --help` for all options.
 
-All supported keys appear above, plus `output` for a fixed filename or `-` for
-stdout. Choose either `output` or `output-dir`. Relative config paths resolve
-from the repository root; CLI output paths resolve from `$PWD`. Without either,
-output still goes to `$PWD/patchpane/report.html`. Set `new-report = true` to
-keep separate reports instead of replacing the previous one. Existing timestamped
-reports from earlier versions are left untouched.
-Add your report directory to `.gitignore` when using `include-untracked`.
+## Configuration
 
-Override booleans with `--open` / `--no-open`, `--staged` / `--unstaged`, and
-`--include-untracked` / `--no-include-untracked`. Use `--output-dir DIR` to select the report directory
-or `-o FILE` to choose the filename; either overrides the configured output
-setting. `--no-config` skips configuration entirely. Unknown or duplicate keys,
-invalid values, and malformed config produce errors; config includes are unsupported.
+Create `.patchpane` at your Git repository root to set project defaults.
+See [`.patchpane.example`](.patchpane.example) for all settings.
+Command-line arguments take priority over the configuration file.
 
 ## Development
 
