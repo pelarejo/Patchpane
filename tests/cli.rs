@@ -170,7 +170,8 @@ fn default_output_uses_calling_directory_even_with_repo_option() {
         );
     }
     let files: Vec<_> = fs::read_dir(caller.join("patchpane")).unwrap().collect();
-    assert_eq!(files.len(), 2);
+    assert_eq!(files.len(), 1);
+    assert!(caller.join("patchpane/report.html").exists());
     for file in files {
         let path = file.unwrap().path();
         assert_eq!(path.extension().unwrap(), "html");
@@ -184,7 +185,7 @@ fn default_output_uses_calling_directory_even_with_repo_option() {
 }
 
 #[test]
-fn unborn_index_and_output_protection() {
+fn unborn_index_and_output_replacement() {
     let r = Repo::new();
     r.write("new", b"first\n");
     r.git(&["add", "."]);
@@ -197,12 +198,19 @@ fn unborn_index_and_output_protection() {
             .success()
     );
     let original = fs::read(path).unwrap();
+    r.write("new", b"second version\n");
+    r.git(&["add", "new"]);
     assert!(
-        !r.run(&["--cached", "--no-open", "-o", path])
+        r.run(&["--cached", "--no-open", "-o", path])
             .status
             .success()
     );
-    assert_eq!(fs::read(path).unwrap(), original);
+    assert_ne!(fs::read(path).unwrap(), original);
+    assert!(
+        fs::read_to_string(path)
+            .unwrap()
+            .contains("+second version")
+    );
 }
 
 #[test]
@@ -362,7 +370,7 @@ fn configuration_is_root_scoped_and_output_paths_are_root_relative() {
     );
     assert!(r.run(&[]).status.success());
     assert!(r.0.join("fixed.html").exists());
-    assert!(!r.run(&[]).status.success());
+    assert!(r.run(&[]).status.success());
     assert!(r.html(&[]).starts_with("<!doctype html>"));
 }
 
@@ -384,4 +392,63 @@ fn invalid_config_is_actionable_and_can_be_bypassed() {
         assert!(r.html(&["--no-config"]).contains("\"files\":[]"));
         assert!(r.run(&["--help"]).status.success());
     }
+}
+
+#[test]
+fn new_reports_and_cli_config_precedence_preserve_previous_reports() {
+    let r = Repo::new();
+    let directory = r.0.join("reports");
+    let directory = directory.to_str().unwrap();
+    let args = ["--no-open", "--output-dir", directory];
+    assert!(r.run(&args).status.success());
+    let original = fs::read(r.0.join("reports/report.html")).unwrap();
+    for _ in 0..2 {
+        let mut command = args.to_vec();
+        command.push("--new-report");
+        assert!(r.run(&command).status.success());
+    }
+    assert_eq!(fs::read_dir(directory).unwrap().count(), 3);
+    assert_eq!(fs::read(r.0.join("reports/report.html")).unwrap(), original);
+    r.write(
+        ".patchpane",
+        b"[patchpane]\nopen = false\noutput-dir = reports\nnew-report = true\n",
+    );
+    assert!(r.run(&[]).status.success());
+    assert_eq!(fs::read_dir(directory).unwrap().count(), 4);
+    assert!(r.run(&["--overwrite"]).status.success());
+    assert_eq!(fs::read_dir(directory).unwrap().count(), 4);
+    r.write(
+        ".patchpane",
+        b"[patchpane]\nopen = false\noutput-dir = reports\nnew-report = false\n",
+    );
+    assert!(r.run(&["--new-report"]).status.success());
+    assert_eq!(fs::read_dir(directory).unwrap().count(), 5);
+    let output = r.0.join("review.html");
+    r.write("review.html", b"keep this report");
+    assert!(
+        r.run(&["--new-report", "-o", output.to_str().unwrap()])
+            .status
+            .success()
+    );
+    assert_eq!(fs::read(&output).unwrap(), b"keep this report");
+    assert!(fs::read_dir(&r.0).unwrap().any(|f| {
+        f.unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with("review-")
+    }));
+    assert!(r.html(&["--new-report"]).starts_with("<!doctype html>"));
+}
+
+#[test]
+fn failed_generation_preserves_existing_report() {
+    let r = Repo::new();
+    let output = r.0.join("review.html");
+    r.write("review.html", b"previous report");
+    assert!(
+        !r.run(&["bad-revision", "--no-open", "-o", output.to_str().unwrap()])
+            .status
+            .success()
+    );
+    assert_eq!(fs::read(output).unwrap(), b"previous report");
 }
