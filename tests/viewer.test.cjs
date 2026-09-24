@@ -26,3 +26,92 @@ test('large replacements avoid combinatorial matching', () => {
   const patch = '@@ -1,20000 +1,20000 @@\n' + '-old\n'.repeat(20000) + '+new\n'.repeat(20000);
   const rows = parseRows(patch, true); assert.equal(rows.length, 20001); assert.equal(rows.at(-1).right.next, 20000);
 });
+
+const { intralineDiff, lineParts } = require('../src/viewer.js');
+const changedText = parts => parts.filter(p => p.changed).map(p => p.text).join('');
+const fullText = parts => parts.map(p => p.text).join('');
+
+test('highlights separated edits and preserves unchanged code between them', () => {
+  const [old, next] = intralineDiff('let count = 10; return count;', 'let total = 20; return count;');
+  assert.equal(fullText(old), 'let count = 10; return count;');
+  assert.equal(fullText(next), 'let total = 20; return count;');
+  assert.ok(old.some(p => !p.changed && p.text.includes(' = ')));
+  assert.ok(next.some(p => !p.changed && p.text.includes('; return count;')));
+  assert.ok(changedText(old).includes('1'));
+  assert.ok(changedText(next).includes('2'));
+});
+
+test('insertion, deletion, identical and empty lines', () => {
+  let parts = intralineDiff('call(x)', 'call(x, y)');
+  assert.equal(changedText(parts[0]), ''); assert.equal(changedText(parts[1]), ', y');
+  parts = intralineDiff('call(x, y)', 'call(x)');
+  assert.equal(changedText(parts[0]), ', y'); assert.equal(changedText(parts[1]), '');
+  assert.deepEqual(intralineDiff('', ''), [[], []]);
+  assert.equal(changedText(intralineDiff('', 'new')[1]), 'new');
+  assert.equal(changedText(intralineDiff('same', 'same')[0]), '');
+});
+
+test('graphemes, whitespace and hostile markup remain exact text', () => {
+  for (const [a, b] of [
+    ['x👩‍💻y', 'x👨‍💻y'], ['cafe\u0301', 'cafe'],
+    ['\tfoo  bar', ' foo bar'],
+    ['<img src=x onerror=alert(1)>', '</script><script>alert(2)</script>'],
+  ]) {
+    const parts = intralineDiff(a, b);
+    assert.equal(fullText(parts[0]), a); assert.equal(fullText(parts[1]), b);
+  }
+  assert.equal(changedText(intralineDiff('x👩‍💻y', 'x👨‍💻y')[0]), '👩‍💻');
+  assert.equal(changedText(intralineDiff('cafe\u0301', 'cafe')[0]), 'cafe\u0301');
+});
+
+test('split and unified use the same lazy paired highlighting', () => {
+  const patch = '@@ -1,2 +1,3 @@\n-value = 1\n keep\n+extra\n';
+  assert.equal(lineParts(parseRows(patch, true)[1].left), null);
+  const replacement = '@@ -1 +1 @@\n-value = 1\n+value = 2\n+extra\n';
+  const split = parseRows(replacement, true);
+  const unified = parseRows(replacement, false);
+  assert.equal(Object.hasOwn(split[1].left.pair, 'parts'), false);
+  assert.deepEqual(lineParts(split[1].left), lineParts(unified[1].single));
+  assert.deepEqual(lineParts(split[1].right), lineParts(unified[2].single));
+  assert.equal(changedText(lineParts(split[1].left)), '1');
+  assert.equal(changedText(lineParts(split[1].right)), '2');
+  assert.equal(lineParts(split[2].right), null);
+});
+
+test('newline annotations stay outside character highlights', () => {
+  const rows = parseRows('@@ -1 +1 @@\n-value = old\n\\ No newline at end of file\n+value = new\n', true);
+  const parts = lineParts(rows[1].left);
+  assert.equal(fullText(parts), 'value = old\n\\ No newline at end of file');
+  assert.equal(parts.at(-1).changed, false);
+});
+
+test('long lines and expensive comparisons fall back to whole-line coloring', () => {
+  assert.equal(intralineDiff('a'.repeat(4097), 'b'), null);
+  assert.equal(intralineDiff('a,'.repeat(300), 'b;'.repeat(300)), null);
+  const prefix = 'unchanged '.repeat(300);
+  assert.equal(changedText(intralineDiff(prefix + 'x', prefix + 'y')[1]), 'y');
+});
+
+
+test('identifier replacements form one chunk rather than matching incidental characters', () => {
+  const parts = intralineDiff('text', 'abctedefxf');
+  assert.deepEqual(parts, [[{ text: 'text', changed: true }], [{ text: 'abctedefxf', changed: true }]]);
+  const rename = intralineDiff('const userName = getUser();', 'const accountName = getAccount();');
+  assert.equal(changedText(rename[0]), 'userNamegetUser');
+  assert.equal(changedText(rename[1]), 'accountNamegetAccount');
+  assert.ok(rename[0].some(p => p.text === ' = ' && !p.changed));
+});
+
+test('whole-line replacements have no word overlay in either layout', () => {
+  for (const split of [true, false]) {
+    for (const [old, next] of [['text', 'abctedefxf'], ['  old value', '  new content'], ['', 'added']]) {
+      const rows = parseRows(`@@ -1 +1 @@\n-${old}\n\\ No newline at end of file\n+${next}\n`, split);
+      const left = split ? rows[1].left : rows[1].single;
+      const right = split ? rows[1].right : rows[2].single;
+      assert.equal(lineParts(left), null);
+      assert.equal(lineParts(right), null);
+      assert.equal(left.text, old + '\n\\ No newline at end of file');
+      assert.equal(right.text, next);
+    }
+  }
+});

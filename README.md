@@ -25,7 +25,11 @@ the selected patch, so treat it like source code when sharing it.
 Split/unified views, line numbers, file filtering, viewed markers, collapsible
 files, line wrapping, and system light/dark theme. Files render near the viewport;
 large files load 400 rows at a time. Full patch data stays embedded in the HTML.
-Viewed markers last until reload. Replacement lines are paired by position.
+Viewed markers last until reload. Replacement lines are paired by position, with
+stronger backgrounds on changed words and identifiers in split and unified views.
+Each file has one horizontal scrollbar that moves both sides together; horizontal
+trackpad gestures or Shift+wheel over the diff use the same shared position. Highlighting
+is computed as rows render; oversized comparisons fall back to whole-line coloring.
 
 Untracked files are excluded by default. `--include-untracked` appends current
 untracked files as additions, respects ignore rules and path filters, and leaves

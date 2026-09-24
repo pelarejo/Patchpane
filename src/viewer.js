@@ -5,6 +5,11 @@ function parseRows(patch, split) {
   const rows = [];
   let old = 0, next = 0, inHunk = false, deleted = [], added = [];
   function flush() {
+    for (let i = 0; i < Math.min(deleted.length, added.length); i++) {
+      const pair = { left: deleted[i].text, right: added[i].text };
+      deleted[i].pair = pair; deleted[i].pairSide = 0;
+      added[i].pair = pair; added[i].pairSide = 1;
+    }
     if (split) {
       for (let i = 0; i < Math.max(deleted.length, added.length); i++)
         rows.push({ left: deleted[i], right: added[i] });
@@ -42,7 +47,89 @@ function parseRows(patch, split) {
   flush(); return rows;
 }
 
-if (typeof module !== 'undefined') module.exports = { parseRows };
+// Bounded token LCS, computed only when a replacement line is displayed.
+// Graphemes keep emoji and combining marks intact. Large comparisons fall back
+// to the existing line backgrounds instead of doing unbounded work.
+const graphemes = typeof Intl.Segmenter === 'function'
+  ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null;
+function intralineDiff(left, right) {
+  if (left.length > 4096 || right.length > 4096) return null;
+  const split = text => graphemes
+    ? Array.from(graphemes.segment(text), part => part.segment) : Array.from(text);
+  function tokens(text) {
+    const result = [];
+    let previousKind;
+    for (const character of split(text)) {
+      const kind = /^[\p{L}\p{N}\p{M}_]+$/u.test(character) ? 'word'
+        : /^[ \t]+$/.test(character) ? 'space' : 'punctuation';
+      if (kind !== 'punctuation' && kind === previousKind) result[result.length - 1] += character;
+      else result.push(character);
+      previousKind = kind;
+    }
+    return result;
+  }
+  const a = tokens(left), b = tokens(right);
+  let start = 0, endA = a.length, endB = b.length;
+  while (start < endA && start < endB && a[start] === b[start]) start++;
+  while (endA > start && endB > start && a[endA - 1] === b[endB - 1]) { endA--; endB--; }
+  const n = endA - start, m = endB - start;
+  if (n * m > 65536) return null;
+  const width = m + 1;
+  const scores = new Uint16Array((n + 1) * width);
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      scores[i * width + j] = a[start + i] === b[start + j]
+        ? 1 + scores[(i + 1) * width + j + 1]
+        : Math.max(scores[(i + 1) * width + j], scores[i * width + j + 1]);
+    }
+  }
+  const parts = [[], []];
+  function push(side, text, changed) {
+    if (!text) return;
+    const last = parts[side].at(-1);
+    if (last && last.changed === changed) last.text += text;
+    else parts[side].push({ text, changed });
+  }
+  push(0, a.slice(0, start).join(''), false);
+  push(1, b.slice(0, start).join(''), false);
+  let i = 0, j = 0;
+  while (i < n || j < m) {
+    if (i < n && j < m && a[start + i] === b[start + j]) {
+      push(0, a[start + i++], false); push(1, b[start + j++], false);
+    } else if (i < n && (j === m || scores[(i + 1) * width + j] >= scores[i * width + j + 1])) {
+      push(0, a[start + i++], true);
+    } else {
+      push(1, b[start + j++], true);
+    }
+  }
+  push(0, a.slice(endA).join(''), false); push(1, b.slice(endB).join(''), false);
+  return parts;
+}
+
+function lineParts(item) {
+  if (!item?.pair) return null;
+  const pair = item.pair;
+  if (!Object.hasOwn(pair, 'parts')) {
+    // The parser appends Git's missing-newline annotation after a newline.
+    // Keep that annotation visible, but outside character matching.
+    const content = [pair.left, pair.right].map(text => text.split('\n', 1)[0]);
+    pair.parts = intralineDiff(...content);
+    // Shared indentation/spacing alone doesn't make a replacement partial.
+    // Whole-line replacements already have the red/green line background.
+    if (pair.parts && !pair.parts[0].some(part => !part.changed && part.text.trim())) {
+      pair.parts = null;
+    }
+    if (pair.parts) {
+      [pair.left, pair.right].forEach((text, side) => {
+        const annotation = text.slice(content[side].length);
+        if (annotation) pair.parts[side].push({ text: annotation, changed: false });
+      });
+    }
+  }
+  return pair.parts?.[item.pairSide] ?? null;
+}
+
+if (typeof module !== 'undefined') module.exports = { parseRows, intralineDiff, lineParts };
 if (typeof document !== 'undefined') startViewer();
 
 function startViewer() {
@@ -70,9 +157,20 @@ function startViewer() {
     }
   }, { rootMargin: '400px' });
 
-  function codeCell(className, text) {
+  function codeCell(className, item, prefix = '') {
     const td = element('td', className);
-    td.append(element('div', 'line', text));
+    const viewport = element('div', 'line');
+    const line = element('span', 'line-content');
+    viewport.append(line);
+    if (prefix) line.append(prefix);
+    const parts = lineParts(item);
+    if (parts) {
+      for (const part of parts) {
+        if (part.changed) line.append(element('span', 'intraline', part.text));
+        else line.append(part.text);
+      }
+    } else line.append(item?.text ?? '');
+    td.append(viewport);
     return td;
   }
 
@@ -87,11 +185,50 @@ function startViewer() {
     for (const name of split ? ['number', 'code', 'number', 'code'] : ['number', 'number', 'code']) cols.append(element('col', name));
     const tbody = document.createElement('tbody');
     table.append(cols, tbody); scroll.append(table); entry.body.append(scroll);
+    const horizontal = element('div', 'file-horizontal-scroll');
+    horizontal.tabIndex = 0;
+    horizontal.setAttribute('role', 'region');
+    horizontal.setAttribute('aria-label', `Horizontal scroll for ${entry.file.path}; both sides scroll together`);
+    const extent = element('div'); horizontal.append(extent);
+    entry.body.append(horizontal);
+    function pan() {
+      table.style.setProperty('--file-pan', `${-horizontal.scrollLeft}px`);
+    }
+    entry.updateScroll = () => {
+      if (!table.clientWidth) return;
+      let overflow = 0;
+      if (!document.body.classList.contains('wrap')) {
+        for (const content of table.querySelectorAll('.line-content')) {
+          overflow = Math.max(overflow, content.scrollWidth - content.parentElement.clientWidth + 20);
+        }
+      }
+      horizontal.hidden = overflow <= 0;
+      extent.style.width = `${table.clientWidth + overflow}px`;
+      horizontal.scrollLeft = Math.min(horizontal.scrollLeft, overflow);
+      pan();
+    };
+    horizontal.addEventListener('scroll', pan);
+    scroll.addEventListener('wheel', event => {
+      const delta = event.shiftKey && !event.deltaX ? event.deltaY : event.deltaX;
+      if (!delta || horizontal.hidden) return;
+      const scale = event.deltaMode === 1 ? 21 : event.deltaMode === 2 ? table.clientWidth : 1;
+      horizontal.scrollLeft += delta * scale;
+      pan(); event.preventDefault();
+    }, { passive: false });
+    horizontal.addEventListener('keydown', event => {
+      const changes = { ArrowLeft: -40, ArrowRight: 40, Home: -Infinity, End: Infinity };
+      if (!(event.key in changes)) return;
+      const max = horizontal.scrollWidth - horizontal.clientWidth;
+      horizontal.scrollLeft = Math.max(0, Math.min(max, horizontal.scrollLeft + changes[event.key]));
+      pan(); event.preventDefault();
+    });
+    entry.resizeObserver = new ResizeObserver(entry.updateScroll);
+    entry.resizeObserver.observe(table);
     let cursor = 0;
     const more = element('button', 'load-more');
     function cell(row, item, side) {
       row.append(element('td', `number ${item?.kind || 'gap'}`, item ? String((side === 'old' ? item.old : item.next) ?? '') : ''));
-      row.append(codeCell(`code ${item?.kind || 'gap'} ${side === 'next' ? 'split-edge' : ''}`, item?.text ?? ''));
+      row.append(codeCell(`code ${item?.kind || 'gap'} ${side === 'next' ? 'split-edge' : ''}`, item));
     }
     function batch() {
       const fragment = document.createDocumentFragment();
@@ -105,11 +242,12 @@ function startViewer() {
           cell(row, item.left, 'old'); cell(row, item.right, 'next');
         } else {
           const line = item.single;
-          row.append(element('td', `number ${line.kind}`, String(line.old ?? '')), element('td', `number ${line.kind}`, String(line.next ?? '')), codeCell(`code ${line.kind}`, `${line.kind === 'add' ? '+' : line.kind === 'del' ? '−' : ' '} ${line.text}`));
+          row.append(element('td', `number ${line.kind}`, String(line.old ?? '')), element('td', `number ${line.kind}`, String(line.next ?? '')), codeCell(`code ${line.kind}`, line, `${line.kind === 'add' ? '+' : line.kind === 'del' ? '−' : ' '} `));
         }
         fragment.append(row);
       }
       tbody.append(fragment);
+      entry.updateScroll();
       more.textContent = `Show next ${Math.min(400, rows.length - cursor)} rows (${rows.length - cursor} remaining)`;
       more.hidden = cursor >= rows.length;
     }
@@ -160,6 +298,8 @@ function startViewer() {
   function layout(value) {
     split = value; $('split').setAttribute('aria-pressed', String(split)); $('unified').setAttribute('aria-pressed', String(!split));
     for (const entry of entries) {
+      entry.resizeObserver?.disconnect();
+      entry.updateScroll = null;
       entry.body.replaceChildren(); entry.rendered = false;
       const rect = entry.article.getBoundingClientRect();
       if (!entry.article.hidden && entry.details.open && rect.top < innerHeight + 400 && rect.bottom > -400) render(entry);
@@ -167,7 +307,10 @@ function startViewer() {
   }
   $('split').addEventListener('click', () => layout(true));
   $('unified').addEventListener('click', () => layout(false));
-  $('wrap').addEventListener('click', () => $('wrap').setAttribute('aria-pressed', String(document.body.classList.toggle('wrap'))));
+  $('wrap').addEventListener('click', () => {
+    $('wrap').setAttribute('aria-pressed', String(document.body.classList.toggle('wrap')));
+    for (const entry of entries) entry.updateScroll?.();
+  });
   $('collapse').addEventListener('click', () => {
     const expand = entries.every(e => !e.details.open);
     for (const entry of entries) entry.details.open = expand;
