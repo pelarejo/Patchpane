@@ -244,7 +244,8 @@ fn large_diff_keeps_every_line_in_one_self_contained_document() {
     assert!(h.contains("+line 24999"));
     assert!(h.contains("\"added\":25000"));
     assert!(!h.contains("<script src="));
-    assert!(!h.contains("<link "));
+    assert!(h.contains("rel=\"icon\" type=\"image/svg+xml\" href=\"data:image/svg+xml,"));
+    assert!(!h.contains("rel=\"stylesheet\""));
 }
 
 #[test]
