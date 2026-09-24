@@ -19,7 +19,9 @@ Usage: patchpane [OPTIONS] [REVISION [REVISION]] [-- PATH...]
   --no-open, --open     Disable/enable browser opening
   --unstaged            Override a configured staged comparison
   --no-include-untracked  Override configured untracked file inclusion
-  --output-dir DIR      Directory for uniquely named HTML files
+  --output-dir DIR      Report directory (default filename: report.html)
+  --new-report          Create a uniquely named report on each run
+  --overwrite           Replace the report (default; overrides config)
   --no-config           Ignore the project .patchpane configuration
   --context N           Context lines per hunk (default: 3)
   -h, --help            Show help
@@ -32,7 +34,7 @@ Examples:
 
 With no revision, shows unstaged tracked changes, like git diff.
 Untracked files are excluded unless --include-untracked is set.
-Existing output files are never overwritten.
+Reports are replaced by default; use --new-report to retain each run.
 Paths such as '.' are accepted directly; use '-- PATH...' to disambiguate.
 Defaults are read from .patchpane at the Git root; CLI options take priority.
 ";
@@ -43,6 +45,7 @@ struct Options {
     output: Option<OsString>,
     output_dir: Option<PathBuf>,
     no_config: bool,
+    new_report: bool,
     revisions: Vec<OsString>,
     paths: Vec<OsString>,
     path_separator: bool,
@@ -88,6 +91,8 @@ fn options_with_defaults(
             Some("--unstaged") => opt.staged = false,
             Some("--no-include-untracked") => opt.include_untracked = false,
             Some("--no-config") => opt.no_config = true,
+            Some("--new-report") => opt.new_report = true,
+            Some("--overwrite") => opt.new_report = false,
             Some("--include-untracked") => opt.include_untracked = true,
             Some("-C" | "--repo" | "-o" | "--output" | "--output-dir" | "--context") => {
                 let value = args
@@ -400,6 +405,7 @@ fn project_defaults(cli: &Options) -> Result<Options, String> {
         };
         match key {
             "patchpane.open" => defaults.no_open = !boolean()?,
+            "patchpane.new-report" => defaults.new_report = boolean()?,
             "patchpane.staged" => defaults.staged = boolean()?,
             "patchpane.include-untracked" => defaults.include_untracked = boolean()?,
             "patchpane.context" => {
@@ -434,6 +440,57 @@ fn project_defaults(cli: &Options) -> Result<Options, String> {
         ));
     }
     Ok(defaults)
+}
+
+fn unique_report_path(path: &std::path::Path) -> PathBuf {
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let mut name = path
+        .file_stem()
+        .unwrap_or(std::ffi::OsStr::new("report"))
+        .to_os_string();
+    name.push(format!("-{}-{stamp}", std::process::id()));
+    if let Some(extension) = path.extension() {
+        name.push(".");
+        name.push(extension);
+    }
+    path.with_file_name(name)
+}
+
+fn write_report(path: &std::path::Path, content: &[u8], overwrite: bool) -> Result<(), String> {
+    // Write beside the destination and rename only after the complete report is
+    // written. Failed writes leave the previous report intact; symlinks aren't followed.
+    let temporary = if overwrite {
+        unique_report_path(path).with_extension("tmp")
+    } else {
+        path.to_path_buf()
+    };
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(&temporary)
+        .map_err(|e| format!("cannot create {}: {e}", temporary.display()))?;
+    let result = file.write_all(content).and_then(|()| file.sync_all());
+    drop(file);
+    let result = result.and_then(|()| {
+        if overwrite {
+            std::fs::rename(&temporary, path)
+        } else {
+            Ok(())
+        }
+    });
+    if let Err(error) = result {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(format!("cannot write {}: {error}", path.display()));
+    }
+    Ok(())
 }
 
 fn run() -> Result<(), String> {
@@ -522,24 +579,14 @@ fn run() -> Result<(), String> {
         };
         std::fs::create_dir_all(&directory)
             .map_err(|e| format!("cannot create {}: {e}", directory.display()))?;
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        directory.join(format!("patchpane-{}-{stamp}.html", std::process::id()))
+        directory.join("report.html")
     };
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut file = options
-        .open(&path)
-        .map_err(|e| format!("cannot create {}: {e}", path.display()))?;
-    file.write_all(html.as_bytes())
-        .map_err(|e| format!("cannot write HTML: {e}"))?;
+    let path = if opt.new_report {
+        unique_report_path(&path)
+    } else {
+        path
+    };
+    write_report(&path, html.as_bytes(), !opt.new_report)?;
     let path = path.canonicalize().map_err(|e| e.to_string())?;
     eprintln!(
         "{} files (+{} −{}) → {}",
