@@ -32,5 +32,5 @@
     # Use "-" to write HTML to stdout without opening a browser or creating a file.
     # output = review.html
 
-# Repository selection (-C), revisions, and path filters are CLI-only.
+# Repository selection (-C), revisions, path filters, and --preserve-old are CLI-only.
 # Viewer controls such as line wrapping and split/unified layout aren't config keys.

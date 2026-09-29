@@ -442,6 +442,80 @@ fn new_reports_and_cli_config_precedence_preserve_previous_reports() {
 }
 
 #[test]
+fn preserve_old_archives_previous_contents_and_prints_name() {
+    let r = Repo::new();
+    let directory = r.0.join("reports");
+    let args = [
+        "--preserve-old",
+        "--output-dir",
+        directory.to_str().unwrap(),
+    ];
+    let first = r.run(&args);
+    assert!(first.status.success());
+    assert!(!String::from_utf8_lossy(&first.stderr).contains("Preserved previous report"));
+    for index in 0..2 {
+        let previous = format!("previous report {index}");
+        fs::write(directory.join("report.html"), &previous).unwrap();
+        let result = r.run(&args);
+        assert!(result.status.success());
+        let files: Vec<_> = fs::read_dir(&directory)
+            .unwrap()
+            .map(|f| f.unwrap().path())
+            .collect();
+        assert_eq!(files.len(), index + 2);
+        let archive = files
+            .iter()
+            .find(|p| fs::read(p).unwrap() == previous.as_bytes())
+            .unwrap();
+        assert!(
+            String::from_utf8_lossy(&result.stderr)
+                .contains(archive.file_name().unwrap().to_str().unwrap())
+        );
+        assert!(String::from_utf8_lossy(&result.stderr).contains("file://"));
+        assert!(
+            fs::read_to_string(directory.join("report.html"))
+                .unwrap()
+                .starts_with("<!doctype html>")
+        );
+    }
+}
+
+#[test]
+fn preserve_old_with_custom_output_and_other_output_modes() {
+    let r = Repo::new();
+    r.write(".patchpane", b"[patchpane]\noutput = index.html\n");
+    r.write("index.html", b"original");
+    assert!(!r.run(&["--preserve-old", "bad-revision"]).status.success());
+    assert_eq!(fs::read(r.0.join("index.html")).unwrap(), b"original");
+    assert!(r.html(&["--preserve-old"]).starts_with("<!doctype html>"));
+    let count = || {
+        fs::read_dir(&r.0)
+            .unwrap()
+            .filter(|f| {
+                f.as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("index-")
+            })
+            .count()
+    };
+    assert_eq!(count(), 0);
+    let result = r.run(&["--preserve-old"]);
+    assert!(result.status.success());
+    assert_eq!(count(), 1);
+    assert!(String::from_utf8_lossy(&result.stderr).contains("index-"));
+    assert!(r.run(&[]).status.success());
+    assert_eq!(count(), 1);
+    let current = fs::read(r.0.join("index.html")).unwrap();
+    let result = r.run(&["--preserve-old", "--new-report"]);
+    assert!(result.status.success());
+    assert_eq!(count(), 2);
+    assert_eq!(fs::read(r.0.join("index.html")).unwrap(), current);
+    assert!(!String::from_utf8_lossy(&result.stderr).contains("Preserved previous report"));
+}
+
+#[test]
 fn failed_generation_preserves_existing_report() {
     let r = Repo::new();
     let output = r.0.join("review.html");

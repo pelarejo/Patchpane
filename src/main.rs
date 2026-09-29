@@ -22,6 +22,7 @@ Usage: patchpane [OPTIONS] [REVISION [REVISION]] [-- PATH...]
   --output-dir DIR      Report directory (default filename: report.html)
   --new-report          Create a uniquely named report on each run
   --overwrite           Replace the report (default; overrides config)
+  --preserve-old        Archive the previous report before replacing it
   --no-config           Ignore the project .patchpane configuration
   --context N           Context lines per hunk (default: 3)
   -h, --help            Show help
@@ -46,6 +47,7 @@ struct Options {
     output_dir: Option<PathBuf>,
     no_config: bool,
     new_report: bool,
+    preserve_old: bool,
     revisions: Vec<OsString>,
     paths: Vec<OsString>,
     path_separator: bool,
@@ -94,6 +96,7 @@ fn options_with_defaults(
             Some("--no-config") => opt.no_config = true,
             Some("--new-report") => opt.new_report = true,
             Some("--overwrite") => opt.new_report = false,
+            Some("--preserve-old") => opt.preserve_old = true,
             Some("--include-untracked") => opt.include_untracked = true,
             Some("-C" | "--repo" | "-o" | "--output" | "--output-dir" | "--context") => {
                 let value = args
@@ -470,7 +473,12 @@ fn unique_report_path(path: &std::path::Path) -> PathBuf {
     path.with_file_name(name)
 }
 
-fn write_report(path: &std::path::Path, content: &[u8], overwrite: bool) -> Result<(), String> {
+fn write_report(
+    path: &std::path::Path,
+    content: &[u8],
+    overwrite: bool,
+    preserve_old: bool,
+) -> Result<Option<PathBuf>, String> {
     // Write beside the destination and rename only after the complete report is
     // written. Failed writes leave the previous report intact; symlinks aren't followed.
     let temporary = if overwrite {
@@ -490,8 +498,23 @@ fn write_report(path: &std::path::Path, content: &[u8], overwrite: bool) -> Resu
         .map_err(|e| format!("cannot create {}: {e}", temporary.display()))?;
     let result = file.write_all(content).and_then(|()| file.sync_all());
     drop(file);
+    let mut archived = None;
     let result = result.and_then(|()| {
         if overwrite {
+            if preserve_old {
+                match std::fs::symlink_metadata(path) {
+                    Ok(metadata) if metadata.is_file() => {
+                        let archive = unique_report_path(path);
+                        // Linking refuses collisions and keeps the old report intact
+                        // until the completed replacement is installed.
+                        std::fs::hard_link(path, &archive)?;
+                        archived = Some(archive);
+                    }
+                    Ok(_) => return Err(io::Error::other("previous report is not a regular file")),
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error),
+                }
+            }
             std::fs::rename(&temporary, path)
         } else {
             Ok(())
@@ -499,9 +522,12 @@ fn write_report(path: &std::path::Path, content: &[u8], overwrite: bool) -> Resu
     });
     if let Err(error) = result {
         let _ = std::fs::remove_file(&temporary);
+        if let Some(archive) = &archived {
+            let _ = std::fs::remove_file(archive);
+        }
         return Err(format!("cannot write {}: {error}", path.display()));
     }
-    Ok(())
+    Ok(archived)
 }
 
 fn run() -> Result<(), String> {
@@ -597,7 +623,11 @@ fn run() -> Result<(), String> {
     } else {
         path
     };
-    write_report(&path, html.as_bytes(), !opt.new_report)?;
+    if let Some(archive) = write_report(&path, html.as_bytes(), !opt.new_report, opt.preserve_old)?
+    {
+        let archive = archive.canonicalize().map_err(|e| e.to_string())?;
+        eprintln!("Preserved previous report: {}", file_url(&archive));
+    }
     let path = path.canonicalize().map_err(|e| e.to_string())?;
     eprintln!(
         "{} files (+{} −{})",
