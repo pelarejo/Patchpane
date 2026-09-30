@@ -414,6 +414,13 @@ function startViewer() {
       if (!entry.article.hidden && entry.details.open && rect.top < innerHeight + 400 && rect.bottom > -400) render(entry);
     }
   }
+  $('toggle-tree').addEventListener('click', () => {
+    const hidden = !$('file-tree').hidden;
+    $('file-tree').hidden = hidden;
+    document.querySelector('.workspace').classList.toggle('tree-hidden', hidden);
+    $('toggle-tree').setAttribute('aria-expanded', String(!hidden));
+    $('toggle-tree').textContent = hidden ? 'Show file tree' : 'Hide file tree';
+  });
   $('split').addEventListener('click', () => layout(true));
   $('unified').addEventListener('click', () => layout(false));
   $('wrap').addEventListener('click', () => {

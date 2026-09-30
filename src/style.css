@@ -41,3 +41,5 @@ aside{min-width:0}
 .hljs-comment,.hljs-quote{color:#a7b0bf}
 .hljs-meta,.hljs-tag,.hljs-name{color:#ffb3af}
 }
+
+.workspace.tree-hidden{grid-template-columns:minmax(0,1fr)}
