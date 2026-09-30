@@ -340,7 +340,7 @@ function startViewer() {
     const check = document.createElement('input'); check.type = 'checkbox'; check.setAttribute('aria-label', `Mark ${file.path} viewed`);
     label.append(check, 'Viewed'); label.addEventListener('click', e => e.stopPropagation());
     summary.append(counts, label);
-    const body = element('div', 'file-body'); details.append(summary, body); article.append(details); $('review').append(article);
+    const body = element('div', 'file-body'); details.append(summary, body); article.append(details);
     const entry = { file, article, details, body, check, link, rendered: false }; entries.push(entry);
     check.addEventListener('change', () => { link.classList.toggle('done', check.checked); updateProgress(); });
     details.addEventListener('toggle', () => { if (details.open && article.getBoundingClientRect().top < innerHeight + 400 && article.getBoundingClientRect().bottom > -400) render(entry); });
@@ -365,6 +365,8 @@ function startViewer() {
     for (const file of [...node.files].sort((a, b) => a.name.localeCompare(b.name))) {
       const link = entries[file.index].link;
       parent.append(link); links.push(link);
+      // Use this same directory-first traversal for the diff panels and navigation.
+      $('review').append(entries[file.index].article);
     }
     return { groups, links };
   }
