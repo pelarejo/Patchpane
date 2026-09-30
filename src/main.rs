@@ -237,7 +237,11 @@ fn json(value: &str) -> String {
     out
 }
 
-fn render(title: &str, files: &[FileDiff]) -> String {
+fn render(title: &str, comparison: &str, files: &[FileDiff]) -> String {
+    let generated_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
     let data = files.iter().map(|f| format!("{{\"path\":{},\"oldPath\":{},\"added\":{},\"removed\":{},\"binary\":{},\"patch\":{}}}", json(&f.path), f.old_path.as_deref().map(json).unwrap_or("null".into()), f.added, f.removed, f.binary, json(&f.patch))).collect::<Vec<_>>().join(",");
     include_str!("page.html")
         .replace("/* PATCHPANE_CSS */", include_str!("style.css"))
@@ -253,7 +257,12 @@ fn render(title: &str, files: &[FileDiff]) -> String {
         .replace("/* SYNTAX_JS */", include_str!("syntax.js"))
         .replace(
             "<!-- PATCHPANE_DATA -->",
-            &format!("{{\"title\":{},\"files\":[{}]}}", json(title), data),
+            &format!(
+                "{{\"title\":{},\"comparison\":{},\"generatedAt\":{generated_at},\"files\":[{}]}}",
+                json(title),
+                json(comparison),
+                data
+            ),
         )
 }
 
@@ -530,6 +539,61 @@ fn write_report(
     Ok(archived)
 }
 
+fn report_title(opt: &Options) -> Result<(String, String), String> {
+    let directory = match &opt.repo {
+        Some(repo) => PathBuf::from(repo),
+        None => env::current_dir().map_err(|e| e.to_string())?,
+    }
+    .canonicalize()
+    .map_err(|e| e.to_string())?;
+    let name = directory
+        .file_name()
+        .unwrap_or(directory.as_os_str())
+        .to_string_lossy();
+    let revisions = git_output(
+        git_command(opt)
+            .args(["rev-parse", "--revs-only", "--no-flags"])
+            .args(&opt.revisions),
+    )?;
+    let revisions = String::from_utf8_lossy(&revisions);
+    let mut labels = Vec::new();
+    for revision in revisions.lines() {
+        let revision = revision.trim_start_matches('^');
+        let label =
+            git_output(git_command(opt).args(["show", "-s", "--format=%h — %s", revision, "--"]))?;
+        labels.push(String::from_utf8_lossy(&label).trim().to_owned());
+    }
+    let comparison = if labels.is_empty() {
+        let state = if opt.staged {
+            "Staged changes"
+        } else {
+            "Working tree"
+        };
+        let branch =
+            git_output(git_command(opt).args(["symbolic-ref", "--quiet", "--short", "HEAD"]))
+                .map(|s| String::from_utf8_lossy(&s).trim().to_owned())
+                .unwrap_or_else(|_| "Detached HEAD".into());
+        let commit =
+            git_output(git_command(opt).args(["show", "-s", "--format=%h — %s", "HEAD", "--"]))
+                .map(|s| String::from_utf8_lossy(&s).trim().to_owned())
+                .unwrap_or_else(|_| "No commits yet".into());
+        format!("{state} · {branch} · {commit}")
+    } else {
+        let selection = opt
+            .revisions
+            .iter()
+            .map(|r| r.to_string_lossy())
+            .collect::<Vec<_>>()
+            .join(" ");
+        format!(
+            "{selection}{} · {}",
+            if opt.staged { " · staged" } else { "" },
+            labels.join(" / ")
+        )
+    };
+    Ok((name.into_owned(), comparison))
+}
+
 fn run() -> Result<(), String> {
     let args: Vec<_> = env::args_os().skip(1).collect();
     let Some(cli) = options(args.clone().into_iter())? else {
@@ -580,24 +644,8 @@ fn run() -> Result<(), String> {
     if opt.include_untracked {
         files.extend(untracked_diff(&opt)?);
     }
-    let comparison = if opt.revisions.is_empty() {
-        if opt.staged {
-            "Staged changes".into()
-        } else {
-            "Working tree".into()
-        }
-    } else {
-        format!(
-            "{}{}",
-            opt.revisions
-                .iter()
-                .map(|r| r.to_string_lossy())
-                .collect::<Vec<_>>()
-                .join(" "),
-            if opt.staged { " · staged" } else { "" }
-        )
-    };
-    let html = render(&comparison, &files);
+    let (title, comparison) = report_title(&opt)?;
+    let html = render(&title, &comparison, &files);
     if opt.output.as_deref() == Some(std::ffi::OsStr::new("-")) {
         io::stdout()
             .lock()

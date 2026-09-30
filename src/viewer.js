@@ -211,8 +211,13 @@ function startViewer() {
     if (text !== undefined) el.textContent = text;
     return el;
   };
-  $('comparison').textContent = data.title;
-  document.title = `Patchpane · ${data.title}`;
+  const generated = new Date(data.generatedAt);
+  const date = generated.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const time = generated.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  const subtitle = `${date} · ${time}`;
+  $('comparison').textContent = `${data.title} · ${subtitle}`;
+  $('comparison').title = `${generated.toLocaleString()}\n${data.comparison}`;
+  document.title = `Patchpane · ${data.title} · ${subtitle}`;
   $('file-count').textContent = data.files.length;
   const additions = data.files.reduce((n, f) => n + f.added, 0);
   const deletions = data.files.reduce((n, f) => n + f.removed, 0);

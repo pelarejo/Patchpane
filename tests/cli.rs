@@ -516,6 +516,57 @@ fn preserve_old_with_custom_output_and_other_output_modes() {
 }
 
 #[test]
+fn titles_identify_directory_and_selected_revision() {
+    let r = Repo::new();
+    r.git(&["symbolic-ref", "HEAD", "refs/heads/title-test"]);
+    let title = |args: &[&str]| {
+        let html = r.html(args);
+        html.split("\"title\":")
+            .nth(1)
+            .unwrap()
+            .split(",\"files\":")
+            .next()
+            .unwrap()
+            .to_owned()
+    };
+    let initial = title(&["."]);
+    let generated_at: u128 = initial
+        .split("\"generatedAt\":")
+        .nth(1)
+        .unwrap()
+        .parse()
+        .unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    assert!(generated_at <= now && now - generated_at < 60_000);
+    assert!(initial.contains(r.0.file_name().unwrap().to_str().unwrap()));
+    assert!(initial.contains("Working tree · title-test · No commits yet"));
+    r.write("file.txt", b"first\n");
+    r.commit();
+    let hash = Command::new("git")
+        .arg("-C")
+        .arg(&r.0)
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .unwrap();
+    let hash = String::from_utf8(hash.stdout).unwrap();
+    let working = title(&["."]);
+    assert!(working.contains(&format!("title-test · {} — fixture", hash.trim())));
+    assert!(title(&["--staged"]).contains("Staged changes"));
+    r.write("file.txt", b"second\n");
+    r.git(&["commit", "-qam", "second revision"]);
+    let previous = title(&["HEAD~1"]);
+    assert!(previous.contains(&format!("HEAD~1 · {} — fixture", hash.trim())));
+    assert!(!previous.contains("second revision"));
+    let range = title(&["HEAD~1..HEAD"]);
+    assert!(range.contains("fixture") && range.contains("second revision"));
+    r.git(&["checkout", "--detach", "-q"]);
+    assert!(title(&[]).contains("Detached HEAD"));
+}
+
+#[test]
 fn failed_generation_preserves_existing_report() {
     let r = Repo::new();
     let output = r.0.join("review.html");
