@@ -334,7 +334,7 @@ function startViewer() {
     const id = `file-${index}`;
     const link = element('a'); link.href = `#${id}`;
     link.append(element('span', 'filename', file.path.split('/').at(-1)), element('span', 'delta plus', `+${file.added}`), element('span', 'delta minus', `−${file.removed}`));
-    link.title = file.path; link.setAttribute('aria-label', file.path);
+    link.title = file.path.split('/').at(-1); link.setAttribute('aria-label', file.path);
     const article = element('article'); article.id = id; article.dataset.index = index;
     const details = document.createElement('details'); details.open = true;
     const summary = document.createElement('summary');
