@@ -12,7 +12,7 @@
 @media print{.file-horizontal-scroll{display:none}}
 
 /* Sidebar directory disclosure controls; file cards keep their own collapse state. */
-nav .filename,nav .directory-name{font-size:14px;font-weight:500}
+nav .filename,nav .directory-name{font-size:14px;font-weight:400}
 nav .directory{margin:2px 0}
 nav .directory>summary{display:flex;min-height:32px;padding:6px 8px;gap:7px;border:0;background:transparent;font-size:12px;color:var(--muted);list-style:none}
 nav .directory>summary:hover{background:var(--hover);border-radius:5px}
