@@ -4,6 +4,11 @@ Review Git changes in a clean, local HTML page. Patchpane brings side-by-side
 diffs, syntax coloring, and focused change highlighting to your terminal workflow, with everything
 contained in one file that works offline.
 
+**This project was built entirely as an exercise in vibe coding and is provided
+as is, without warranty.**
+
+It does, however, make staring at diffs surprisingly pleasant.
+
 ## Install
 
 ```sh
@@ -36,13 +41,19 @@ Command-line arguments take priority over the configuration file.
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test
-node --test tests/viewer.test.cjs   # Node is only needed for these viewer tests
+node --test tests/viewer.test.cjs   # Node is only needed for tests
+node --test tests/release.test.cjs  # Release-script tests (macOS/Linux)
 cargo build --release
 ```
 
-After committing the release changes, run `./tooling/hb-release.sh` to tag HEAD
-using the version in `Cargo.toml`, push the tag, and print the source archive URL
-and SHA-256 for Homebrew. It fails first if the tag exists locally or on origin.
+Run `./tooling/hb-release.sh` from a clean `main` checkout for a guided release:
+choose a version, run checks, commit the Cargo version, and publish the tag and
+archive checksum. It finishes with manual instructions for updating the formula
+and publishing bottles in the Homebrew tap repository.
+Pass a version directly with `./tooling/hb-release.sh 0.2.0`, or choose `current`
+to release the existing Cargo version. Existing tags are rejected before any edits.
+Use `./tooling/hb-release.sh --dry-run` (`--dry` also works) to rehearse the prompts
+without changing files, running checks, or contacting external services.
 
 `src/main.rs` runs Git and combines NUL-delimited numstat with its matching patch.
 `src/viewer.js` parses hunks on demand and builds the DOM using text nodes.

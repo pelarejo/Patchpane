@@ -18,4 +18,6 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
       - run: node --test tests/viewer.test.cjs
+      - run: node --test tests/release.test.cjs
+        if: runner.os != 'Windows'
       - run: cargo build --release
