@@ -239,3 +239,79 @@ test('invalid or missing saved review state falls back without breaking the view
   const raw = JSON.stringify({ generatedAt: 123, files: [null, {}, { path: 'bad', viewed: 'true', open: false }] });
   assert.equal(readReviewState(raw, 123).size, 0);
 });
+
+test('floating controls keep a nonzero slot width after leaving normal flow', () => {
+  const { setupFloatingControls } = require('../src/viewer.js');
+  const originals = Object.fromEntries(['document', 'window', 'ResizeObserver', 'requestAnimationFrame', 'setTimeout', 'clearTimeout'].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  let floating = false, top = 100, availableWidth = 800;
+  const events = {}, controlEvents = {}, frames = [], timers = new Map();
+  let timerId = 0;
+  const classes = new Set();
+  const controls = {
+    style: {}, scrollWidth: 450, offsetHeight: 32,
+    addEventListener: (event, fn) => { controlEvents[event] = fn; },
+    classList: { contains: name => classes.has(name), toggle: (name, value) => {
+      if (value) classes.add(name); else classes.delete(name);
+      floating = classes.has('floating');
+    } },
+  };
+  const slot = {
+    style: {}, querySelector: () => controls,
+    getBoundingClientRect: () => ({ top, bottom: top + 32, left: 30,
+      width: Math.min(availableWidth, parseFloat(slot.style.width) || (floating ? 0 : 450)) }),
+  };
+  try {
+    globalThis.document = { querySelector: selector => selector === '.controls-slot' ? slot : { getBoundingClientRect: () => ({ bottom: 66 }) }, documentElement: { style: { setProperty() {} } } };
+    globalThis.window = { addEventListener: (event, fn) => { events[event] = fn; }, matchMedia: () => ({ matches: false }) };
+    globalThis.ResizeObserver = class { observe() {} };
+    globalThis.requestAnimationFrame = fn => { frames.push(fn); return frames.length; };
+    globalThis.setTimeout = fn => { timers.set(++timerId, fn); return timerId; };
+    globalThis.clearTimeout = id => timers.delete(id);
+    const scroll = () => { events.scroll(); frames.shift()(); };
+    setupFloatingControls(expanded => controls.classList.toggle('expanded', expanded));
+    top = 50;
+    scroll();
+    assert.equal(floating, false); // The bottom of the regular row is still visible.
+    top = 34;
+    scroll();
+    assert.equal(floating, true); // The complete row has passed behind the header.
+    top = -50;
+    scroll();
+    scroll(); // A second update used to measure the now-empty slot as zero.
+    assert.equal(floating, true);
+    assert.equal(controls.style.width, '450px');
+    availableWidth = 280;
+    scroll();
+    assert.equal(controls.style.width, '280px');
+    top = 100;
+    scroll();
+    assert.equal(floating, true); // Stay fixed until the reverse animation finishes.
+    assert.equal(classes.has('exiting'), true);
+    top = -50;
+    scroll();
+    assert.equal(classes.has('exiting'), false); // Scrolling down cancels the exit.
+    controlEvents.animationend({ target: controls, animationName: 'controls-slide-out' });
+    assert.equal(floating, true);
+    controls.classList.toggle('expanded', true);
+    top = 100;
+    scroll();
+    assert.equal(classes.has('expanded'), false);
+    assert.equal(classes.has('exiting'), false); // Close first, keeping the icon stationary.
+    assert.equal(floating, true);
+    timers.get(timerId)();
+    frames.shift()();
+    assert.equal(classes.has('exiting'), true);
+    controlEvents.animationend({ target: controls, animationName: 'controls-slide-out' });
+    frames.shift()();
+    assert.equal(floating, false);
+    assert.equal(controls.style.width, '');
+    assert.equal(classes.has('returning'), true);
+    controlEvents.animationend({ target: controls, animationName: 'controls-fade-in' });
+    assert.equal(classes.has('returning'), false);
+  } finally {
+    for (const [key, descriptor] of Object.entries(originals)) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+  }
+});
