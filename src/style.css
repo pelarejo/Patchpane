@@ -12,6 +12,7 @@
 @media print{.file-horizontal-scroll{display:none}}
 
 /* Sidebar directory disclosure controls; file cards keep their own collapse state. */
+nav .filename,nav .directory-name{font-size:14px;font-weight:500}
 nav .directory{margin:2px 0}
 nav .directory>summary{display:flex;min-height:32px;padding:6px 8px;gap:7px;border:0;background:transparent;font-size:12px;color:var(--muted);list-style:none}
 nav .directory>summary:hover{background:var(--hover);border-radius:5px}
@@ -45,7 +46,7 @@ aside{min-width:0}
 .workspace.tree-hidden{grid-template-columns:minmax(0,1fr)}
 .file-heading{display:flex;align-items:center;gap:8px;flex:1;min-width:0}
 .file-heading .file-title{flex:0 1 auto;min-width:0}
-.copy-filename{flex-shrink:0;font-size:11px;padding:4px 7px}
+.copy-filename{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;padding:4px}
 @media(max-width:850px){.file-heading{min-width:60%}}
 @media print{.copy-filename{display:none}}
 .controls-slot{width:580px;max-width:100%;min-width:0;flex-shrink:1}

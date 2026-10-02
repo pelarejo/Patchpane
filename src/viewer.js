@@ -513,10 +513,19 @@ function startViewer() {
     const details = document.createElement('details'); details.open = savedFile?.open ?? true;
     const summary = document.createElement('summary');
     const heading = element('span', 'file-heading');
-    const copy = element('button', 'copy-filename', 'Copy');
+    const copy = element('button', 'copy-filename');
     copy.type = 'button';
-    copy.title = `Copy ${file.path}`;
-    copy.setAttribute('aria-label', `Copy filename ${file.path}`);
+    const copyIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    for (const [key, value] of Object.entries({ viewBox: '0 0 24 24', width: '16', height: '16', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.7', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', focusable: 'false' })) copyIcon.setAttribute(key, value);
+    const copyPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    copyIcon.append(copyPath); copy.append(copyIcon);
+    function copyFeedback(state) {
+      copyPath.setAttribute('d', state === 'Copied' ? 'M5 12l4 4L19 6' : state === 'Copy failed' ? 'M12 5v9m0 4v1' : 'M8 8h12v12H8z M16 8V4H4v12h4');
+      const label = state || `Copy filename ${file.path}`;
+      copy.title = label;
+      copy.setAttribute('aria-label', label);
+    }
+    copyFeedback();
     copy.setAttribute('aria-live', 'polite');
     let copyTimer;
     copy.addEventListener('click', async event => {
@@ -524,11 +533,11 @@ function startViewer() {
       clearTimeout(copyTimer);
       try {
         await copyFileName(file.path);
-        copy.textContent = 'Copied';
+        copyFeedback('Copied');
       } catch {
-        copy.textContent = 'Copy failed';
+        copyFeedback('Copy failed');
       }
-      copyTimer = setTimeout(() => { copy.textContent = 'Copy'; }, 2000);
+      copyTimer = setTimeout(() => copyFeedback(), 2000);
     });
     heading.append(element('span', 'file-title', file.oldPath ? `${file.oldPath} → ${file.path}` : file.path), copy);
     summary.append(heading);
