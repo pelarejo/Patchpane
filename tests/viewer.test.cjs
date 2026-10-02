@@ -220,3 +220,22 @@ test('embedded highlighter escapes HTML script parser comment transitions', () =
   assert.ok(!source.includes('<!--'));
   assert.ok(!source.toLowerCase().includes('</script'));
 });
+
+const { readReviewState } = require('../src/viewer.js');
+test('review state restores viewed and collapsed files only for the same report generation', () => {
+  const raw = JSON.stringify({ generatedAt: 123, files: [
+    { path: 'src/a.rs', viewed: true, open: false },
+    { path: '__proto__', viewed: false, open: true },
+  ] });
+  const restored = readReviewState(raw, 123);
+  assert.deepEqual(restored.get('src/a.rs'), { path: 'src/a.rs', viewed: true, open: false });
+  assert.equal(restored.get('__proto__').open, true);
+  assert.equal(readReviewState(raw, 124).size, 0);
+});
+test('invalid or missing saved review state falls back without breaking the viewer', () => {
+  for (const raw of [null, 'invalid', '{}', '{"generatedAt":123,"files":null}']) {
+    assert.equal(readReviewState(raw, 123).size, 0);
+  }
+  const raw = JSON.stringify({ generatedAt: 123, files: [null, {}, { path: 'bad', viewed: 'true', open: false }] });
+  assert.equal(readReviewState(raw, 123).size, 0);
+});

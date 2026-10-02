@@ -180,7 +180,7 @@ async function copyFileName(name) {
   }
 }
 
-function setupTreeResizer(handle, pane, workspace) {
+function setupTreeResizer(handle, pane, workspace, initialWidth, saveWidth) {
   let chosenWidth = null, drag = null;
   function update(width) {
     const { min, max } = treeWidthLimits(workspace.clientWidth);
@@ -194,6 +194,7 @@ function setupTreeResizer(handle, pane, workspace) {
 
   }
   function stop() {
+    if (drag) saveWidth(chosenWidth);
     drag = null;
     document.body.classList.remove('resizing-tree');
   }
@@ -213,18 +214,27 @@ function setupTreeResizer(handle, pane, workspace) {
   });
   handle.addEventListener('pointercancel', stop);
   handle.addEventListener('lostpointercapture', stop);
-  handle.addEventListener('dblclick', () => update(null));
+  handle.addEventListener('dblclick', () => { update(null); saveWidth(null); });
   window.addEventListener('resize', () => { stop(); update(chosenWidth); });
-  update(null);
+  update(initialWidth);
 }
 
-if (typeof module !== 'undefined') module.exports = { parseRows, intralineDiff, lineParts, buildFileTree, compactDirectory };
+function readReviewState(raw, generatedAt) {
+  try {
+    const saved = JSON.parse(raw);
+    if (saved?.generatedAt !== generatedAt || !Array.isArray(saved.files)) return new Map();
+    return new Map(saved.files.filter(file => file && typeof file.path === 'string'
+      && typeof file.viewed === 'boolean' && typeof file.open === 'boolean')
+      .map(file => [file.path, file]));
+  } catch { return new Map(); }
+}
+
+if (typeof module !== 'undefined') module.exports = { parseRows, intralineDiff, lineParts, buildFileTree, compactDirectory, readReviewState };
 if (typeof document !== 'undefined') startViewer();
 
 function startViewer() {
   const data = JSON.parse(document.getElementById('diff-data').textContent);
   const $ = id => document.getElementById(id);
-  setupTreeResizer($('tree-resizer'), $('file-tree'), document.querySelector('.workspace'));
   const element = (tag, className, text) => {
     const el = document.createElement(tag);
     if (className) el.className = className;
@@ -243,16 +253,21 @@ function startViewer() {
   const deletions = data.files.reduce((n, f) => n + f.removed, 0);
   $('stats').append(`${data.files.length} changed files`, '  ·  ', element('span', 'plus', `+${additions}`), '  ', element('span', 'minus', `−${deletions}`));
   const preferenceKey = 'patchpane:viewer-preferences';
-  const preferences = { split: true, wrap: true, treeHidden: false };
+  const preferences = { split: true, wrap: true, treeHidden: false, treeWidth: null };
   try {
     const saved = JSON.parse(localStorage.getItem(preferenceKey));
-    for (const key of Object.keys(preferences)) {
+    for (const key of ['split', 'wrap', 'treeHidden']) {
       if (typeof saved?.[key] === 'boolean') preferences[key] = saved[key];
     }
+    if (Number.isFinite(saved?.treeWidth) && saved.treeWidth > 0) preferences.treeWidth = saved.treeWidth;
   } catch {} // Keep defaults when browser storage is unavailable or invalid.
   function savePreferences() {
     try { localStorage.setItem(preferenceKey, JSON.stringify(preferences)); } catch {}
   }
+  setupTreeResizer($('tree-resizer'), $('file-tree'), document.querySelector('.workspace'), preferences.treeWidth, width => {
+    preferences.treeWidth = width;
+    savePreferences();
+  });
   function showTree(hidden) {
     $('file-tree').hidden = hidden;
     document.querySelector('.workspace').classList.toggle('tree-hidden', hidden);
@@ -266,6 +281,21 @@ function startViewer() {
   $('wrap').setAttribute('aria-pressed', String(preferences.wrap));
   showTree(preferences.treeHidden);
   const entries = [];
+  const reviewKey = `patchpane:review:${location.pathname}`;
+  let reviewState = new Map(), reviewFrame = null;
+  try { reviewState = readReviewState(sessionStorage.getItem(reviewKey), data.generatedAt); } catch {}
+  function saveReviewState() {
+    $('collapse').textContent = entries.length && entries.every(entry => !entry.details.open) ? 'Expand all' : 'Collapse all';
+    try {
+      sessionStorage.setItem(reviewKey, JSON.stringify({ generatedAt: data.generatedAt,
+        files: entries.map(entry => ({ path: entry.file.path, viewed: entry.check.checked, open: entry.details.open })) }));
+    } catch {}
+  }
+  function scheduleReviewSave() {
+    if (reviewFrame !== null) return;
+    reviewFrame = requestAnimationFrame(() => { reviewFrame = null; saveReviewState(); });
+  }
+  window.addEventListener('pagehide', saveReviewState);
   const updateProgress = () => $('progress').textContent = `${entries.filter(e => e.check.checked).length} of ${entries.length} files viewed`;
   const observer = new IntersectionObserver(changes => {
     for (const change of changes) if (change.isIntersecting) {
@@ -378,7 +408,8 @@ function startViewer() {
     link.append(element('span', 'filename', file.path.split('/').at(-1)), element('span', 'delta plus', `+${file.added}`), element('span', 'delta minus', `−${file.removed}`));
     link.title = file.path.split('/').at(-1); link.setAttribute('aria-label', file.path);
     const article = element('article'); article.id = id; article.dataset.index = index;
-    const details = document.createElement('details'); details.open = true;
+    const savedFile = reviewState.get(file.path);
+    const details = document.createElement('details'); details.open = savedFile?.open ?? true;
     const summary = document.createElement('summary');
     const heading = element('span', 'file-heading');
     const copy = element('button', 'copy-filename', 'Copy');
@@ -404,12 +435,14 @@ function startViewer() {
     counts.append(element('span', 'plus', `+${file.added}`), '  ', element('span', 'minus', `−${file.removed}`));
     const label = element('label', 'viewed');
     const check = document.createElement('input'); check.type = 'checkbox'; check.setAttribute('aria-label', `Mark ${file.path} viewed`);
+    check.checked = savedFile?.viewed ?? false;
+    link.classList.toggle('done', check.checked);
     label.append(check, 'Viewed'); label.addEventListener('click', e => e.stopPropagation());
     summary.append(counts, label);
     const body = element('div', 'file-body'); details.append(summary, body); article.append(details);
     const entry = { file, article, details, body, check, link, rendered: false }; entries.push(entry);
-    check.addEventListener('change', () => { link.classList.toggle('done', check.checked); updateProgress(); });
-    details.addEventListener('toggle', () => { if (details.open && article.getBoundingClientRect().top < innerHeight + 400 && article.getBoundingClientRect().bottom > -400) render(entry); });
+    check.addEventListener('change', () => { link.classList.toggle('done', check.checked); updateProgress(); scheduleReviewSave(); });
+    details.addEventListener('toggle', () => { scheduleReviewSave(); if (details.open && article.getBoundingClientRect().top < innerHeight + 400 && article.getBoundingClientRect().bottom > -400) render(entry); });
     link.addEventListener('click', () => { details.open = true; render(entry); for (const e of entries) e.link.classList.toggle('active', e === entry); });
     observer.observe(article);
   }
@@ -495,6 +528,7 @@ function startViewer() {
     savePreferences();
     for (const entry of entries) entry.updateScroll?.();
   });
+  $('collapse').textContent = entries.length && entries.every(entry => !entry.details.open) ? 'Expand all' : 'Collapse all';
   $('collapse').addEventListener('click', () => {
     const expand = entries.every(e => !e.details.open);
     for (const entry of entries) entry.details.open = expand;
