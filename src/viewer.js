@@ -439,8 +439,39 @@ function startViewer() {
     for (const entry of entries) entry.details.open = expand;
     $('collapse').textContent = expand ? 'Collapse all' : 'Expand all';
   });
-  if (/^#file-\d+$/.test(location.hash)) {
-    const entry = entries[Number(location.hash.slice(6))];
-    if (entry) { render(entry); requestAnimationFrame(() => entry.article.scrollIntoView()); }
+  const positionKey = `patchpane:position:${location.pathname}`;
+  let savedPosition = null;
+  try { savedPosition = JSON.parse(sessionStorage.getItem(positionKey)); } catch {}
+  const sameReport = savedPosition?.generatedAt === data.generatedAt;
+  const reloading = performance.getEntriesByType('navigation')[0]?.type === 'reload';
+  const orderedEntries = [...$('review').children].map(article => entries[Number(article.dataset.index)]).filter(Boolean);
+  let restoringPosition = true, positionFrame = null;
+  function savePosition() {
+    if (restoringPosition) return;
+    // Follow the file at the top of the review, including manual scrolling.
+    const entry = orderedEntries.find(entry => !entry.article.hidden && entry.article.getBoundingClientRect().bottom > 84);
+    try {
+      sessionStorage.setItem(positionKey, JSON.stringify({ generatedAt: data.generatedAt, file: entry?.file.path }));
+    } catch {} // Local-file storage may be unavailable in some browsers.
   }
+  window.addEventListener('scroll', () => {
+    if (positionFrame !== null) return;
+    positionFrame = requestAnimationFrame(() => { positionFrame = null; savePosition(); });
+  }, { passive: true });
+  window.addEventListener('pagehide', savePosition);
+  let target = reloading && sameReport ? entries.find(entry => entry.file.path === savedPosition.file) : null;
+  // An old hash refers to a different file after regeneration; discard it on reload.
+  const regenerated = reloading && savedPosition && !sameReport;
+  if (!target && !regenerated && /^#file-\d+$/.test(location.hash)) target = entries[Number(location.hash.slice(6))];
+  if (regenerated || target) history.scrollRestoration = 'manual';
+  if (target) {
+    const previous = orderedEntries[orderedEntries.indexOf(target) - 1];
+    if (previous) render(previous);
+    render(target);
+  }
+  requestAnimationFrame(() => {
+    if (target) target.article.scrollIntoView();
+    else if (regenerated) window.scrollTo(0, 0);
+    requestAnimationFrame(() => { restoringPosition = false; savePosition(); });
+  });
 }
