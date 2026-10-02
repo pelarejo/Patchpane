@@ -75,3 +75,6 @@ article{scroll-margin-top:var(--review-scroll-top,84px)}
 .confetti i{position:absolute;top:-15px;width:8px;height:12px;animation:confetti-fall 3s linear both}
 @keyframes confetti-fall{0%{transform:translate(0,-15px) rotate(0);opacity:1}85%{opacity:1}100%{transform:translate(var(--drift),calc(100vh + 30px)) rotate(var(--spin));opacity:0}}
 @media(prefers-reduced-motion:reduce),print{.confetti{display:none}}
+#review-end{text-align:center;padding:36px 16px 48px;color:var(--muted);font-size:12px}
+#review-end .finish-emoji{display:block;font-size:36px}
+#review-end p{margin:12px 0 6px;font-size:20px;font-weight:650;color:var(--text)}

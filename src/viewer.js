@@ -366,10 +366,13 @@ function startViewer() {
     $('toggle-controls').setAttribute('aria-label', label);
     $('toggle-controls').title = label;
   }
-  let viewClicks = 0;
+  let viewClicks = [];
   $('toggle-controls').addEventListener('click', () => {
     expandControls($('toggle-controls').getAttribute('aria-expanded') !== 'true');
-    if (++viewClicks === 5) { viewClicks = 0; showerConfetti(); }
+    const now = performance.now();
+    viewClicks = viewClicks.filter(time => now - time <= 2000);
+    viewClicks.push(now);
+    if (viewClicks.length === 5) { viewClicks = []; showerConfetti(); }
   });
   document.querySelector('.controls').addEventListener('keydown', event => {
     if (event.key === 'Escape' && document.querySelector('.controls').classList.contains('floating') && $('toggle-controls').getAttribute('aria-expanded') === 'true') {
@@ -580,6 +583,18 @@ function startViewer() {
     return visible;
   }
   updateProgress();
+  const endings = [
+    ['☕', 'That’s a wrap!', 'Every diff has had its moment.'],
+    ['🎉', 'You made it!', 'No more lines ahead.'],
+    ['✨', 'All diffed out.', 'Time for a well-earned break.'],
+    ['🚀', 'End of the diffiverse.', 'Nothing but whitespace beyond here.'],
+    ['🎬', 'Fin.', 'The code will return in the next commit.'],
+  ];
+  const [emoji, headline, message] = endings[Math.floor(Math.random() * endings.length)];
+  $('review-end').querySelector('.finish-emoji').textContent = emoji;
+  $('review-end').querySelector('p').textContent = headline;
+  $('review-end').querySelector('.finish-message').textContent = message;
+  $('review-end').hidden = entries.length === 0;
   if (!entries.length) {
     const empty = element('div', 'empty-state');
     empty.append(element('h2', '', 'No changes to review'), element('p', '', 'The selected comparison contains no changes.'));
@@ -598,6 +613,7 @@ function startViewer() {
       savedFolderState = null;
     }
     $('empty').hidden = visible !== 0 || entries.length === 0;
+    $('review-end').hidden = visible === 0;
     for (const entry of entries) {
       const rect = entry.article.getBoundingClientRect();
       if (!entry.article.hidden && entry.details.open && rect.top < innerHeight + 400 && rect.bottom > -400) render(entry);
