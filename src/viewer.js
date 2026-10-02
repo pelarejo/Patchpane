@@ -247,68 +247,7 @@ function showerConfetti() {
   setTimeout(() => shower.remove(), 4000);
 }
 
-function setupFloatingControls(closeControls = () => {}) {
-  const slot = document.querySelector('.controls-slot');
-  const controls = slot.querySelector('.controls');
-  let frame = null, exiting = false, closing = false, closeTimer = null;
-  function update() {
-    frame = null;
-    // Fixed controls no longer contribute to the slot's intrinsic dimensions.
-    if (!controls.classList.contains('floating')) {
-      slot.style.width = `${controls.scrollWidth}px`;
-      slot.style.minHeight = `${controls.offsetHeight}px`;
-    }
-    const bounds = slot.getBoundingClientRect();
-    const headerBottom = document.querySelector('header').getBoundingClientRect().bottom;
-    const top = headerBottom + 8;
-    const shouldFloat = bounds.bottom <= headerBottom;
-    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (shouldFloat && closing) {
-      clearTimeout(closeTimer);
-      closing = false;
-    }
-    if (!shouldFloat && controls.classList.contains('floating') && controls.classList.contains('expanded')) {
-      closeControls(false);
-      if (!reducedMotion) {
-        closing = true;
-        clearTimeout(closeTimer);
-        closeTimer = setTimeout(() => { closing = false; schedule(); }, 180);
-      }
-    }
-    exiting = !shouldFloat && controls.classList.contains('floating')
-      && !closing && !reducedMotion;
-    const floating = shouldFloat || exiting || closing;
-    if (floating) controls.classList.toggle('returning', false);
-    controls.classList.toggle('exiting', exiting);
-    controls.classList.toggle('floating', floating);
-    controls.style.width = floating ? `${bounds.width}px` : '';
-    controls.style.left = floating ? `${bounds.left}px` : '';
-    controls.style.top = floating ? `${top}px` : '';
-    document.documentElement.style.setProperty('--review-scroll-top', `${top + controls.offsetHeight + 12}px`);
-  }
-  function schedule() {
-    if (frame === null) frame = requestAnimationFrame(update);
-  }
-  controls.addEventListener('animationend', event => {
-    if (event.target !== controls) return;
-    if (event.animationName === 'controls-fade-in') controls.classList.toggle('returning', false);
-    if (event.animationName !== 'controls-slide-out' || !exiting) return;
-    exiting = false;
-    controls.classList.toggle('exiting', false);
-    controls.classList.toggle('floating', false);
-    controls.classList.toggle('returning', true);
-    controls.style.width = controls.style.left = controls.style.top = '';
-    schedule();
-  });
-  window.addEventListener('scroll', schedule, { passive: true });
-  window.addEventListener('resize', schedule);
-  const observer = new ResizeObserver(schedule);
-  observer.observe(slot);
-  observer.observe(controls);
-  update();
-}
-
-if (typeof module !== 'undefined') module.exports = { parseRows, intralineDiff, lineParts, buildFileTree, compactDirectory, readReviewState, setupFloatingControls };
+if (typeof module !== 'undefined') module.exports = { parseRows, intralineDiff, lineParts, buildFileTree, compactDirectory, readReviewState };
 if (typeof document !== 'undefined') startViewer();
 
 function startViewer() {
@@ -375,12 +314,11 @@ function startViewer() {
     if (viewClicks.length === 5) { viewClicks = []; showerConfetti(); }
   });
   document.querySelector('.controls').addEventListener('keydown', event => {
-    if (event.key === 'Escape' && document.querySelector('.controls').classList.contains('floating') && $('toggle-controls').getAttribute('aria-expanded') === 'true') {
+    if (event.key === 'Escape' && $('toggle-controls').getAttribute('aria-expanded') === 'true') {
       expandControls(false);
       $('toggle-controls').focus();
     }
   });
-  setupFloatingControls(expandControls);
   const entries = [];
   const reviewKey = `patchpane:review:${location.pathname}`;
   let reviewState = new Map(), reviewFrame = null;
@@ -667,7 +605,7 @@ function startViewer() {
   function savePosition() {
     if (restoringPosition) return;
     // Follow the file at the top of the review, including manual scrolling.
-    const reviewTop = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--review-scroll-top')) || 84;
+    const reviewTop = document.querySelector('header').getBoundingClientRect().bottom;
     const entry = orderedEntries.find(entry => !entry.article.hidden && entry.article.getBoundingClientRect().bottom > reviewTop);
     try {
       sessionStorage.setItem(positionKey, JSON.stringify({ generatedAt: data.generatedAt, file: entry?.file.path }));

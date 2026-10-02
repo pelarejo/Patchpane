@@ -49,28 +49,22 @@ aside{min-width:0}
 .copy-filename{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;padding:4px}
 @media(max-width:850px){.file-heading{min-width:60%}}
 @media print{.copy-filename{display:none}}
-.controls-slot{width:580px;max-width:100%;min-width:0;flex-shrink:1}
-.controls{flex-wrap:nowrap;justify-content:flex-end}
-.control-buttons{display:flex;gap:6px;min-width:0;overflow-x:auto}
+header .brand,header .divider{flex-shrink:0}
+header #comparison{flex:1;min-width:0}
+.controls-slot{max-width:calc(100vw - 200px);min-width:34px;flex-shrink:1;margin-left:auto}
+.controls{flex-wrap:nowrap;justify-content:flex-end;align-items:center}
+.control-buttons{display:flex;gap:6px;min-width:0;overflow-x:auto;scrollbar-width:none;max-width:calc(100vw - 246px);opacity:1;visibility:visible;transition:max-width .18s ease,opacity .18s ease,visibility 0s}
+.control-buttons::-webkit-scrollbar{display:none}
+.controls:not(.expanded) .control-buttons{max-width:0;opacity:0;visibility:hidden;pointer-events:none;transition:max-width .18s ease,opacity .18s ease,visibility 0s .18s}
 .controls button{flex-shrink:0;white-space:nowrap}
-.controls.floating{position:fixed;z-index:2;animation:controls-slide-in .22s ease-out}
-@keyframes controls-slide-in{from{opacity:0;transform:translateX(80px)}to{opacity:1;transform:translateX(0)}}
-.controls.floating.exiting{animation:controls-slide-out .22s ease-in forwards;pointer-events:none}
-@keyframes controls-slide-out{from{opacity:1;transform:translateX(0)}to{opacity:0;transform:translateX(80px)}}
-.controls.returning{animation:controls-fade-in .16s ease-out}
-@keyframes controls-fade-in{from{opacity:0}to{opacity:1}}
-@media(prefers-reduced-motion:reduce){.controls.floating,.controls.floating.exiting,.controls.returning{animation:none}}
-#toggle-controls{display:inline-flex;align-items:center;justify-content:center;padding:7px;margin-right:12px}
+#toggle-controls{display:inline-flex;align-items:center;justify-content:center;padding:7px}
 #toggle-controls svg{transform:rotate(0deg);transition:transform .18s ease;transform-origin:center}
 .controls.expanded #toggle-controls svg{transform:rotate(180deg)}
-@media(prefers-reduced-motion:reduce){#toggle-controls svg{transition:none}}
-.controls:not(.floating) #toggle-controls{display:none}
-.controls.floating .control-buttons{max-width:calc(100% - 50px);opacity:1;visibility:visible;transition:max-width .18s ease,opacity .18s ease,visibility 0s}
-.controls.floating .control-buttons{scrollbar-width:none}
-.controls.floating .control-buttons::-webkit-scrollbar{display:none}
-.controls.floating:not(.expanded) .control-buttons{max-width:0;opacity:0;visibility:hidden;pointer-events:none;transition:max-width .18s ease,opacity .18s ease,visibility 0s .18s}
-@media(prefers-reduced-motion:reduce){.controls.floating .control-buttons{transition:none}}
-article{scroll-margin-top:var(--review-scroll-top,84px)}
+@media(prefers-reduced-motion:reduce){#toggle-controls svg,.controls .control-buttons{transition:none}}
+article{scroll-margin-top:66px}
+#review>article{overflow:clip}
+#review>article>details>summary{position:sticky;top:66px;z-index:1}
+@media print{#review>article>details>summary{position:static}}
 @media print{.controls-slot{display:none}}
 .confetti{position:fixed;inset:0;overflow:hidden;pointer-events:none;z-index:10}
 .confetti i{position:absolute;top:-15px;width:8px;height:12px;animation:confetti-fall 3s linear both}
