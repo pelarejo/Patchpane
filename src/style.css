@@ -43,3 +43,8 @@ aside{min-width:0}
 }
 
 .workspace.tree-hidden{grid-template-columns:minmax(0,1fr)}
+.file-heading{display:flex;align-items:center;gap:8px;flex:1;min-width:0}
+.file-heading .file-title{flex:0 1 auto;min-width:0}
+.copy-filename{flex-shrink:0;font-size:11px;padding:4px 7px}
+@media(max-width:850px){.file-heading{min-width:60%}}
+@media print{.copy-filename{display:none}}

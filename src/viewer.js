@@ -160,6 +160,26 @@ function treeWidthLimits(viewportWidth) {
   return { min: 180, max: Math.max(180, Math.min(600, viewportWidth - 360)) };
 }
 
+async function copyFileName(name) {
+  try {
+    await navigator.clipboard.writeText(name);
+    return;
+  } catch {} // Some browsers restrict the clipboard API for local HTML files.
+  const input = document.createElement('textarea');
+  input.value = name;
+  input.readOnly = true;
+  input.style.cssText = 'position:fixed;left:-9999px;top:0';
+  const focused = document.activeElement;
+  document.body.append(input);
+  try {
+    input.select();
+    if (!document.execCommand('copy')) throw new Error('Clipboard unavailable');
+  } finally {
+    input.remove();
+    focused?.focus({ preventScroll: true });
+  }
+}
+
 function setupTreeResizer(handle, pane, workspace) {
   let chosenWidth = null, drag = null;
   function update(width) {
@@ -222,7 +242,29 @@ function startViewer() {
   const additions = data.files.reduce((n, f) => n + f.added, 0);
   const deletions = data.files.reduce((n, f) => n + f.removed, 0);
   $('stats').append(`${data.files.length} changed files`, '  ·  ', element('span', 'plus', `+${additions}`), '  ', element('span', 'minus', `−${deletions}`));
-  let split = true;
+  const preferenceKey = 'patchpane:viewer-preferences';
+  const preferences = { split: true, wrap: true, treeHidden: false };
+  try {
+    const saved = JSON.parse(localStorage.getItem(preferenceKey));
+    for (const key of Object.keys(preferences)) {
+      if (typeof saved?.[key] === 'boolean') preferences[key] = saved[key];
+    }
+  } catch {} // Keep defaults when browser storage is unavailable or invalid.
+  function savePreferences() {
+    try { localStorage.setItem(preferenceKey, JSON.stringify(preferences)); } catch {}
+  }
+  function showTree(hidden) {
+    $('file-tree').hidden = hidden;
+    document.querySelector('.workspace').classList.toggle('tree-hidden', hidden);
+    $('toggle-tree').setAttribute('aria-expanded', String(!hidden));
+    $('toggle-tree').textContent = hidden ? 'Show file tree' : 'Hide file tree';
+  }
+  let split = preferences.split;
+  $('split').setAttribute('aria-pressed', String(split));
+  $('unified').setAttribute('aria-pressed', String(!split));
+  document.body.classList.toggle('wrap', preferences.wrap);
+  $('wrap').setAttribute('aria-pressed', String(preferences.wrap));
+  showTree(preferences.treeHidden);
   const entries = [];
   const updateProgress = () => $('progress').textContent = `${entries.filter(e => e.check.checked).length} of ${entries.length} files viewed`;
   const observer = new IntersectionObserver(changes => {
@@ -338,7 +380,26 @@ function startViewer() {
     const article = element('article'); article.id = id; article.dataset.index = index;
     const details = document.createElement('details'); details.open = true;
     const summary = document.createElement('summary');
-    summary.append(element('span', 'file-title', file.oldPath ? `${file.oldPath} → ${file.path}` : file.path));
+    const heading = element('span', 'file-heading');
+    const copy = element('button', 'copy-filename', 'Copy');
+    copy.type = 'button';
+    copy.title = `Copy ${file.path}`;
+    copy.setAttribute('aria-label', `Copy filename ${file.path}`);
+    copy.setAttribute('aria-live', 'polite');
+    let copyTimer;
+    copy.addEventListener('click', async event => {
+      event.preventDefault(); event.stopPropagation();
+      clearTimeout(copyTimer);
+      try {
+        await copyFileName(file.path);
+        copy.textContent = 'Copied';
+      } catch {
+        copy.textContent = 'Copy failed';
+      }
+      copyTimer = setTimeout(() => { copy.textContent = 'Copy'; }, 2000);
+    });
+    heading.append(element('span', 'file-title', file.oldPath ? `${file.oldPath} → ${file.path}` : file.path), copy);
+    summary.append(heading);
     const counts = element('span', 'file-counts');
     counts.append(element('span', 'plus', `+${file.added}`), '  ', element('span', 'minus', `−${file.removed}`));
     const label = element('label', 'viewed');
@@ -413,6 +474,7 @@ function startViewer() {
   });
   function layout(value) {
     split = value; $('split').setAttribute('aria-pressed', String(split)); $('unified').setAttribute('aria-pressed', String(!split));
+    preferences.split = split; savePreferences();
     for (const entry of entries) {
       entry.resizeObserver?.disconnect();
       entry.updateScroll = null;
@@ -422,16 +484,15 @@ function startViewer() {
     }
   }
   $('toggle-tree').addEventListener('click', () => {
-    const hidden = !$('file-tree').hidden;
-    $('file-tree').hidden = hidden;
-    document.querySelector('.workspace').classList.toggle('tree-hidden', hidden);
-    $('toggle-tree').setAttribute('aria-expanded', String(!hidden));
-    $('toggle-tree').textContent = hidden ? 'Show file tree' : 'Hide file tree';
+    preferences.treeHidden = !$('file-tree').hidden;
+    showTree(preferences.treeHidden); savePreferences();
   });
   $('split').addEventListener('click', () => layout(true));
   $('unified').addEventListener('click', () => layout(false));
   $('wrap').addEventListener('click', () => {
-    $('wrap').setAttribute('aria-pressed', String(document.body.classList.toggle('wrap')));
+    preferences.wrap = document.body.classList.toggle('wrap');
+    $('wrap').setAttribute('aria-pressed', String(preferences.wrap));
+    savePreferences();
     for (const entry of entries) entry.updateScroll?.();
   });
   $('collapse').addEventListener('click', () => {
