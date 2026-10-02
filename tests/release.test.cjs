@@ -123,6 +123,7 @@ test('release ends with a manual Homebrew handoff and never invokes brew or gh',
   assert.doesNotMatch(f.commands(), /^(gh|brew) /m);
   assert.doesNotMatch(out.stdout, /gh release create/);
   assert.match(out.stdout, /git switch -c patchpane-0\.2\.0/);
+  assert.match(out.stdout, /git commit -m "chore\(patchpane\): bump to 0\.2\.0"/);
   assert.match(out.stdout, /Edit Formula\/patchpane\.rb/);
   assert.match(out.stdout, /previous bottle block/);
   assert.match(out.stdout, /gh pr create --repo pelarejo\/homebrew-tap/);
@@ -156,5 +157,6 @@ for (const args of [['--dry-run', '0.2.0'], ['0.2.0', '--dry']]) {
     assert.doesNotMatch(out.stdout, /\[dry\] (gh|brew) /);
     assert.match(out.stdout, /Checks were simulated, not executed/);
     assert.match(out.stdout, /Dry run complete/);
+    assert.doesNotMatch(out.stdout + out.stderr, /\u001b\[/);
   });
 }
